@@ -26,7 +26,7 @@ machine, so don't expose it publicly.
 ## Setup
 
 ```bash
-npm install
+pnpm install
 cp .env.example .env.local   # then put your key in .env.local
 ```
 
@@ -39,9 +39,9 @@ ANTHROPIC_API_KEY=sk-ant-...
 ## Run
 
 ```bash
-npm run dev      # http://localhost:3000
+pnpm dev         # http://localhost:3000
 # or
-npm run build && npm start
+pnpm build && pnpm start
 ```
 
 Enter `owner/repo`, a full `https://github.com/owner/repo` URL, or two repos to
@@ -51,7 +51,7 @@ appear in the sidebar.
 ## How it works
 
 ```
-Browser ─ POST /api/jobs ─────────────► start an in-process job (concurrency 1)
+Browser ─ POST /api/jobs ─────────────► start an in-process job (up to 3 at once)
         ─ GET  /api/jobs/[id]/events ──► SSE stream of progress
         ─ GET  /api/reports ──────────► list from data/index.json
         ─ GET  /api/reports/[id] ─────► serve data/reports/<id>.html

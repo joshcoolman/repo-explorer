@@ -15,13 +15,13 @@ It shells out to `git` and runs a token-heavy agent on the user's machine — ne
 ## Commands
 
 ```bash
-npm run dev      # http://localhost:3000 (Turbopack by default — no --turbopack flag)
-npm run build    # production build
-npm start        # serve the production build
-npm run lint     # eslint (next lint was removed in Next 16; this calls eslint directly)
+pnpm dev         # http://localhost:3000 (Turbopack by default — no --turbopack flag)
+pnpm build       # production build
+pnpm start       # serve the production build
+pnpm lint        # eslint (next lint was removed in Next 16; this calls eslint directly)
 ```
 
-No test framework is configured. Per global instructions: don't run `npm run dev` (the user runs the server); verify changes with a production build instead. Requires Node 20.9+ and `git` on PATH.
+No test framework is configured. Per global instructions: don't run `pnpm dev` (the user runs the server); verify changes with a production build instead. Requires Node 20.9+ and `git` on PATH. This repo uses pnpm (committed `pnpm-lock.yaml`).
 
 ## Architecture
 

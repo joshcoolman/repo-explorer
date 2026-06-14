@@ -103,7 +103,7 @@ export async function runAnalysis(opts: AnalyzeOptions): Promise<AnalyzeResult> 
         permissionMode: "bypassPermissions",
         allowDangerouslySkipPermissions: true,
         includePartialMessages: true, // stream thinking/text token-by-token
-        model: "claude-opus-4-7",
+        model: "claude-opus-4-8",
       },
     })) {
       // Live token deltas — the "document revealing itself" feed.
