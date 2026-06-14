@@ -13,14 +13,14 @@ This is a **local-only** app. It shells out to `git` and runs an agent on your
 machine, so don't expose it publicly.
 
 > [!WARNING]
-> Analysis is resource- and token-heavy. Each review runs on your own Anthropic
-> API key — see the per-run costs in the sidebar of the screenshot below.
+> Analysis is token and resource intensive. Each review runs on your own
+> Anthropic API key. See the per-run costs in the sidebar of the screenshot below.
 
 ![Repo Explorer showing a finished architectural review of addyosmani/agent-skills](docs/screenshot.png)
 
 ## Requirements
 
-- Node 18+ and `git` on your PATH
+- Node 20.9+ and `git` on your PATH
 - An Anthropic API key (billing is on your key)
 
 ## Setup
