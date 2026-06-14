@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>{{TITLE}}</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #161922;
+    --panel-2: #1c2030;
+    --border: #2a2f40;
+    --text: #e6e8ef;
+    --muted: #9aa3b2;
+    --accent: #8ab4ff;
+    --accent-2: #b08aff;
+    --good: #6dd58c;
+    --warn: #f0b85a;
+    --bad: #f08a8a;
+    --code-bg: #0b0d13;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text); }
+  body {
+    font: 16px/1.6 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", "Segoe UI", Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 56px 32px 96px; }
+  header {
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 28px;
+    margin-bottom: 36px;
+  }
+  header .eyebrow {
+    color: var(--accent-2);
+    text-transform: uppercase;
+    font-size: 12px;
+    letter-spacing: 1.5px;
+    font-weight: 600;
+  }
+  header h1 {
+    font-size: 38px;
+    line-height: 1.15;
+    margin: 8px 0 8px;
+    letter-spacing: -0.02em;
+  }
+  header p.lede {
+    color: var(--muted);
+    font-size: 17px;
+    margin: 0;
+    max-width: 720px;
+  }
+  nav.toc {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 18px 22px;
+    margin: 28px 0 40px;
+  }
+  nav.toc h3 { margin: 0 0 10px; font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; }
+  nav.toc ol { margin: 0; padding-left: 20px; columns: 2; column-gap: 24px; }
+  nav.toc a { color: var(--text); text-decoration: none; }
+  nav.toc a:hover { color: var(--accent); }
+  h2 {
+    font-size: 26px;
+    margin: 56px 0 14px;
+    letter-spacing: -0.01em;
+    padding-top: 32px;
+    border-top: 1px solid var(--border);
+  }
+  h2:first-of-type { border-top: none; padding-top: 0; }
+  h3 { font-size: 19px; margin: 28px 0 10px; color: var(--accent); }
+  h4 { font-size: 15px; margin: 18px 0 6px; color: var(--accent-2); text-transform: uppercase; letter-spacing: 0.5px; }
+  p { margin: 8px 0 14px; }
+  ul, ol { padding-left: 22px; }
+  li { margin: 4px 0; }
+  code, kbd {
+    font: 13px/1.5 "JetBrains Mono", "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 1px 6px;
+    color: #d7e2ff;
+  }
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 16px;
+    overflow-x: auto;
+  }
+  pre code { background: transparent; border: 0; padding: 0; }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 14px;
+    margin: 16px 0 24px;
+  }
+  @media (max-width: 720px) {
+    .grid { grid-template-columns: 1fr; }
+    nav.toc ol { columns: 1; }
+    .wrap { padding: 32px 18px 64px; }
+    header h1 { font-size: 30px; }
+  }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px 18px;
+  }
+  .card h4 { margin-top: 0; }
+  .card.idea { border-color: #314261; }
+  .pill {
+    display: inline-block;
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    color: var(--muted);
+    margin-right: 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .pill.good { color: var(--good); border-color: #2f5a3d; background: rgba(109,213,140,0.08); }
+  .pill.warn { color: var(--warn); border-color: #5a4a2f; background: rgba(240,184,90,0.08); }
+  .pill.bad  { color: var(--bad);  border-color: #5a2f2f; background: rgba(240,138,138,0.08); }
+  .pill.neutral { color: var(--accent); border-color: #2f3f5a; background: rgba(138,180,255,0.08); }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 12px 0 22px;
+    font-size: 14px;
+  }
+  th, td {
+    text-align: left;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
+  blockquote {
+    border-left: 3px solid var(--accent);
+    margin: 14px 0;
+    padding: 4px 14px;
+    color: var(--muted);
+    background: rgba(138,180,255,0.04);
+  }
+  .filepath {
+    font: 12px/1.4 "JetBrains Mono", ui-monospace, monospace;
+    color: var(--accent);
+    background: var(--code-bg);
+    padding: 1px 6px;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+    white-space: nowrap;
+  }
+  .callout {
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--accent-2);
+    background: var(--panel-2);
+    border-radius: 8px;
+    padding: 14px 18px;
+    margin: 18px 0;
+  }
+  .callout.warn { border-left-color: var(--warn); }
+  .callout.good { border-left-color: var(--good); }
+  .callout.bad  { border-left-color: var(--bad); }
+  .small { font-size: 13px; color: var(--muted); }
+  .footnote { color: var(--muted); font-size: 13px; margin-top: 48px; border-top: 1px solid var(--border); padding-top: 16px; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  /* Remote citations: a SHA-pinned blob link wrapped in .filepath. Inherit the chip's color, underline only on hover. */
+  .filepath a { color: inherit; text-decoration: none; }
+  .filepath a:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <div class="eyebrow">{{EYEBROW}}</div>
+  <h1>{{H1}}</h1>
+  <p class="lede">{{LEDE}}</p>
+</header>
+
+<nav class="toc">
+  <h3>Contents</h3>
+  <ol>
+    <!-- <li><a href="#anchor">Section</a></li> -->
+  </ol>
+</nav>
+
+<!--
+  Section conventions:
+
+  <h2 id="anchor">N. Section title</h2>
+  <p>...</p>
+
+  Grids of cards (patterns, app ideas):
+    <div class="grid">
+      <div class="card">
+        <h4>Title</h4>
+        <p>...</p>
+        <p class="small"><span class="filepath">path/to/file.ts</span></p>
+      </div>
+    </div>
+
+  Idea cards add the .idea class:
+    <div class="card idea">...</div>
+
+  Verdict pills inside cards or tables:
+    <span class="pill good">Solid</span>
+    <span class="pill warn">Gap</span>
+    <span class="pill bad">Red flag</span>
+    <span class="pill neutral">Neutral</span>
+
+  Callouts for concerns or synthesis:
+    <div class="callout">...</div>
+    <div class="callout warn">...</div>
+    <div class="callout good">...</div>
+    <div class="callout bad">...</div>
+
+  File-map tables:
+    <table>
+      <tr><th>File</th><th>Why read it</th></tr>
+      <tr><td><span class="filepath">path</span></td><td>...</td></tr>
+    </table>
+
+  Citations:
+    Local source  -> <span class="filepath">path/to/file.ts:42</span>
+    Remote source -> <span class="filepath"><a href="https://github.com/owner/repo/blob/<sha>/path/to/file.ts#L42">path/to/file.ts:42</a></span>
+-->
+
+<div class="footnote">
+  Generated from a read-through of {{SUBJECT}} on {{DATE}}.
+</div>
+
+</div>
+</body>
+</html>

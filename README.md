@@ -1,36 +1,71 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Repo Explorer
 
-## Getting Started
+A local web GUI around the `explore-repo` skill. Paste one or two GitHub URLs, hit
+**Go**, and it generates a self-contained HTML architectural review — then keeps an
+index of past reports you can browse in the sidebar.
 
-First, run the development server:
+It runs the skill **headlessly** via the local [Claude Agent SDK]
+(`@anthropic-ai/claude-agent-sdk`): the agent shallow-clones each repo to a temp
+dir, an Explore subagent reads it, and a single HTML report is written to
+`data/reports/`. The clone is always discarded.
+
+This is a **local-only** app. It shells out to `git` and runs an agent on your
+machine, so don't expose it publicly.
+
+> [!WARNING]
+> Analysis is resource- and token-heavy. Each review runs on your own Anthropic
+> API key — see the per-run costs in the sidebar of the screenshot below.
+
+![Repo Explorer showing a finished architectural review of addyosmani/agent-skills](docs/screenshot.png)
+
+## Requirements
+
+- Node 18+ and `git` on your PATH
+- An Anthropic API key (billing is on your key)
+
+## Setup
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
+cp .env.example .env.local   # then put your key in .env.local
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+`.env.local`:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```
+ANTHROPIC_API_KEY=sk-ant-...
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Run
 
-## Learn More
+```bash
+npm run dev      # http://localhost:3000
+# or
+npm run build && npm start
+```
 
-To learn more about Next.js, take a look at the following resources:
+Enter `owner/repo`, a full `https://github.com/owner/repo` URL, or two repos to
+compare. Progress streams live; finished reports render in a sandboxed iframe and
+appear in the sidebar.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## How it works
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+```
+Browser ─ POST /api/jobs ─────────────► start an in-process job (concurrency 1)
+        ─ GET  /api/jobs/[id]/events ──► SSE stream of progress
+        ─ GET  /api/reports ──────────► list from data/index.json
+        ─ GET  /api/reports/[id] ─────► serve data/reports/<id>.html
+job runner ─► Agent SDK query() ─► loads .claude/skills/explore-repo ─► report
+```
 
-## Deploy on Vercel
+- `lib/analyze.ts` — wraps the Agent SDK `query()` call.
+- `lib/jobs.ts` — in-process job registry + queue, streams progress events.
+- `lib/store.ts` — `data/index.json` manifest + report files.
+- `.claude/skills/explore-repo/` — **vendored copy** of the canonical skill from
+  `~/.claude/skills/explore-repo/`. Re-copy it to pick up upstream changes.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Notes
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- Reports and the index live under `data/` and are gitignored.
+- If the process restarts mid-job, that job is lost (acceptable for a local app);
+  completed reports persist on disk.
