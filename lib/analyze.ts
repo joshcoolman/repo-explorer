@@ -14,7 +14,8 @@ export interface AnalyzeOptions {
 }
 
 export interface FollowUpOptions {
-  reportPath: string; // absolute path of the existing report to append to
+  outPath: string; // absolute path to write the new follow-up document to
+  basePath: string; // absolute path of the report's index.html (for house style)
   repos: string[]; // original sources (for re-cloning if the request needs files)
   request: string; // the user's follow-up request
   resume?: string; // prior session id to resume, when available
@@ -49,17 +50,20 @@ function buildPrompt(urls: string[], outFile: string, steeringText?: string): st
     .join(" ");
 }
 
-function buildFollowUpPrompt(reportPath: string, repos: string[], request: string): string {
+function buildFollowUpPrompt(
+  outPath: string,
+  basePath: string,
+  repos: string[],
+  request: string,
+): string {
   const subject = repos.length === 2 ? `${repos[0]} and ${repos[1]}` : repos[0];
   return [
     `This is a follow-up to an architectural review you produced for ${subject}.`,
-    `The existing HTML report is saved at this exact absolute path: ${reportPath}.`,
-    `Read that file first so you match its existing house style — the same CSS classes, dark theme, voice, and citation format already in the document.`,
+    `The original report's overview is at this exact absolute path: ${basePath}. Read it first so you match its house style — the same CSS classes, dark theme, voice, and citation format.`,
     `The user's follow-up request: ${request}`,
-    `Append a single new <section> to that report, inserted immediately before the closing </body> tag, with a heading that names the follow-up (for example "Follow-up: ${request}").`,
-    `Do not rewrite, reorder, or remove any existing sections — only add the new one. Keep the file a single self-contained HTML document with no external assets.`,
-    `Use what you already know from this session first. Only if the request requires reading repository files you don't already have, shallow-clone the source(s) to a temporary directory and discard the clone when finished; do not ask whether to keep it.`,
-    `Do not run any keep-clone prompt. When done, the updated file at ${reportPath} is the only output.`,
+    `Write a NEW, self-contained HTML document that answers the request to this exact absolute path: ${outPath}. Use the same dark-theme house style as the overview, lead with a clear heading that names the follow-up, and include today's date near the top.`,
+    `Do not modify ${basePath} or any other file — ${outPath} is the only file you create.`,
+    `Use what you already know from this session first. Only if the request requires reading repository files you don't already have, shallow-clone the source(s) to a temporary directory and discard the clone when finished; do not ask whether to keep it. Do not run any keep-clone prompt.`,
   ].join(" ");
 }
 
@@ -235,7 +239,7 @@ export async function runAnalysis(opts: AnalyzeOptions): Promise<AnalyzeResult> 
 
 export async function runFollowUp(opts: FollowUpOptions): Promise<AnalyzeResult> {
   return streamQuery({
-    prompt: buildFollowUpPrompt(opts.reportPath, opts.repos, opts.request),
+    prompt: buildFollowUpPrompt(opts.outPath, opts.basePath, opts.repos, opts.request),
     appRoot: opts.appRoot,
     resume: opts.resume,
     startLabel: "Starting follow-up…",

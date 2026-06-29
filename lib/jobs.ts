@@ -3,10 +3,13 @@ import { randomUUID } from "crypto";
 import { runAnalysis, runFollowUp } from "./analyze";
 import {
   getReport,
-  reportHtmlPath,
-  readReportHtml,
+  listFollowUpSlugs,
+  readIndex,
+  readReportDoc,
+  reportDocPath,
+  uniqueSlug,
   upsertReport,
-  writeReportHtml,
+  writeReportDoc,
 } from "./store";
 import { SOURCE_MARKER, sourceBannerHtml } from "./sources";
 import type { ProgressEvent, ReportMeta } from "./types";
@@ -19,9 +22,14 @@ interface Job {
   events: ProgressEvent[]; // buffered for late subscribers
   emitter: EventEmitter;
   done: boolean;
-  // Present only for follow-up jobs: append to an existing report by resuming
-  // its session, instead of producing a brand-new report.
-  followUp?: { targetReportId: string; request: string; original: ReportMeta };
+  // Present only for follow-up jobs: write a new doc into an existing report
+  // folder instead of producing a brand-new report.
+  followUp?: {
+    targetReportId: string;
+    request: string;
+    docSlug: string;
+    original: ReportMeta;
+  };
 }
 
 interface Registry {
@@ -58,8 +66,12 @@ export function subscribe(id: string, listener: (e: ProgressEvent) => void): () 
   return () => job.emitter.off("event", listener);
 }
 
-export function startJob(urls: string[], steeringText?: string): ReportMeta {
-  const id = randomUUID();
+export async function startJob(
+  urls: string[],
+  steeringText?: string,
+): Promise<ReportMeta> {
+  const takenIds = (await readIndex()).map((r) => r.id);
+  const id = uniqueSlug(deriveTitle(urls), takenIds);
   const meta: ReportMeta = {
     id,
     title: deriveTitle(urls),
@@ -108,7 +120,7 @@ async function runJob(job: Job): Promise<void> {
 
   const result = await runAnalysis({
     urls: job.meta.repos,
-    outFile: reportHtmlPath(job.id),
+    outFile: reportDocPath(job.id, "index"),
     appRoot: process.cwd(),
     steeringText: job.meta.steeringText,
     onEvent: emit,
@@ -116,13 +128,13 @@ async function runJob(job: Job): Promise<void> {
 
   // Bake a source-repo reference into the saved file so it's self-contained.
   if (result.ok) {
-    const html = await readReportHtml(job.id);
+    const html = await readReportDoc(job.id, "index");
     if (html && !html.includes(SOURCE_MARKER)) {
       const out = html.replace(
         /<body([^>]*)>/i,
         `<body$1>${sourceBannerHtml(job.meta.repos)}`,
       );
-      await writeReportHtml(job.id, out);
+      await writeReportDoc(job.id, "index", out);
     }
   }
 
@@ -143,10 +155,10 @@ async function runJob(job: Job): Promise<void> {
 }
 
 /**
- * Start a follow-up: resume the report's session and append a new section to its
- * existing HTML in place. Returns the follow-up *job* meta (its id is used only to
- * stream progress); the output folds back into the original report, which is not
- * duplicated in the index. Returns undefined if the report is missing or not done.
+ * Start a follow-up: resume the report's session and write a NEW document into
+ * the report's folder. Returns the follow-up *job* meta (its id only streams
+ * progress); the new doc is recorded on the original report. Returns undefined
+ * if the report is missing or not done.
  */
 export async function startFollowUp(
   reportId: string,
@@ -155,7 +167,8 @@ export async function startFollowUp(
   const original = await getReport(reportId);
   if (!original || original.status !== "done") return undefined;
 
-  const id = randomUUID();
+  const docSlug = uniqueSlug(request, await listFollowUpSlugs(reportId));
+  const id = randomUUID(); // job id, distinct from the report's slug id
   const meta: ReportMeta = {
     id,
     title: `${original.title} (follow-up)`,
@@ -171,12 +184,11 @@ export async function startFollowUp(
     events: [],
     emitter: new EventEmitter(),
     done: false,
-    followUp: { targetReportId: reportId, request, original },
+    followUp: { targetReportId: reportId, request, docSlug, original },
   };
   job.emitter.setMaxListeners(0);
   registry.jobs.set(id, job);
-  // Deliberately NOT persisted via upsertReport — follow-ups update the original
-  // report, they don't create their own index entry.
+  // Not persisted via upsertReport — follow-ups record onto the original report.
 
   registry.queue.push(id);
   pump();
@@ -190,10 +202,11 @@ async function runFollowUpJob(job: Job): Promise<void> {
     job.events.push(e);
     job.emitter.emit("event", e);
   };
-  const { targetReportId, request, original } = job.followUp!;
+  const { targetReportId, request, docSlug, original } = job.followUp!;
 
   const result = await runFollowUp({
-    reportPath: reportHtmlPath(targetReportId),
+    outPath: reportDocPath(targetReportId, docSlug),
+    basePath: reportDocPath(targetReportId, "index"),
     repos: original.repos,
     request,
     resume: original.sessionId,
@@ -201,25 +214,33 @@ async function runFollowUpJob(job: Job): Promise<void> {
     onEvent: emit,
   });
 
-  // Defensive: keep the self-contained source banner if the agent rewrote the head.
+  // Keep the new doc self-contained with its own source banner.
   if (result.ok) {
-    const html = await readReportHtml(targetReportId);
+    const html = await readReportDoc(targetReportId, docSlug);
     if (html && !html.includes(SOURCE_MARKER)) {
       const out = html.replace(
         /<body([^>]*)>/i,
         `<body$1>${sourceBannerHtml(original.repos)}`,
       );
-      await writeReportHtml(targetReportId, out);
+      await writeReportDoc(targetReportId, docSlug, out);
     }
   }
 
-  // Fold results back into the ORIGINAL report: accumulate cost, refresh the
-  // session id, keep it "done". A failed follow-up leaves the report untouched.
+  // Record the follow-up on the ORIGINAL report: list it, accumulate cost,
+  // refresh the session id. A failed follow-up leaves the report untouched.
   const latest = (await getReport(targetReportId)) ?? original;
   await upsertReport({
     ...latest,
     costUsd: (latest.costUsd ?? 0) + (result.costUsd ?? 0),
     sessionId: result.sessionId ?? latest.sessionId,
+    ...(result.ok
+      ? {
+          followUps: [
+            ...(latest.followUps ?? []),
+            { request, slug: docSlug, createdAt: new Date().toISOString() },
+          ],
+        }
+      : {}),
   });
 
   job.meta = {

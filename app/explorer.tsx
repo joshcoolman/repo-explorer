@@ -44,6 +44,13 @@ export default function Explorer() {
   const [followUpText, setFollowUpText] = useState("");
   const [submittingFollowUp, setSubmittingFollowUp] = useState(false);
   const [refreshNonce, setRefreshNonce] = useState(0);
+  // Which doc of the selected report to show: null = the index/overview.
+  const [selectedDoc, setSelectedDoc] = useState<string | null>(null);
+  // Set when Go hits an already-analyzed repo (the dedupe prompt).
+  const [dupe, setDupe] = useState<{
+    existing: ReportMeta;
+    steeringText?: string;
+  } | null>(null);
 
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const [activeStatus, setActiveStatus] = useState<ActiveStatus>(null);
@@ -106,6 +113,7 @@ export default function Explorer() {
             delete followUpTargetRef.current[id];
             if (ev.ok) {
               setSelectedId(target);
+              setSelectedDoc(null); // back to the overview; new doc shows in the sub-nav
               setRefreshNonce((n) => n + 1);
             }
           }
@@ -187,7 +195,7 @@ export default function Explorer() {
   }, [followUpText, selectedId]);
 
   const startAnalysis = useCallback(
-    async (urls: string[], steeringText?: string) => {
+    async (urls: string[], steeringText?: string, force = false) => {
       setFormError(null);
       setView("reports");
       if (urls.length === 0) {
@@ -199,10 +207,14 @@ export default function Explorer() {
         const res = await fetch("/api/jobs", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ urls, steeringText }),
+          body: JSON.stringify({ urls, steeringText, force }),
         });
         const data = await res.json();
         if (!res.ok) {
+          if (res.status === 409 && data?.existing) {
+            setDupe({ existing: data.existing as ReportMeta, steeringText });
+            return;
+          }
           setFormError(data?.error ?? "Failed to start analysis.");
           return;
         }
@@ -212,6 +224,7 @@ export default function Explorer() {
           meta,
           ...reportsRef.current.filter((r) => r.id !== meta.id),
         ];
+        setSelectedDoc(null);
         setSelectedId(meta.id);
         openJob(meta.id);
       } catch {
@@ -239,6 +252,7 @@ export default function Explorer() {
   const onSelect = useCallback(
     (r: ReportMeta) => {
       setView("reports");
+      setSelectedDoc(null);
       setSelectedId(r.id);
       if (r.status === "running" && r.id !== activeJobRef.current) {
         openJob(r.id);
@@ -246,6 +260,26 @@ export default function Explorer() {
     },
     [openJob],
   );
+
+  // Show a specific doc of a report (slug = null → the overview/index).
+  const jumpToDoc = useCallback((reportId: string, slug: string | null) => {
+    setView("reports");
+    setSelectedId(reportId);
+    setSelectedDoc(slug);
+  }, []);
+
+  const deleteReportById = useCallback(async (r: ReportMeta) => {
+    if (!window.confirm(`Delete "${r.title}" and all its follow-ups?`)) return;
+    try {
+      await fetch(`/api/reports/${r.id}`, { method: "DELETE" });
+    } catch {
+      /* best effort — local app */
+    }
+    setReports((prev) => prev.filter((x) => x.id !== r.id));
+    reportsRef.current = reportsRef.current.filter((x) => x.id !== r.id);
+    setSelectedId((cur) => (cur === r.id ? null : cur));
+    setSelectedDoc(null);
+  }, []);
 
   const submitFollowUp = useCallback(
     async (reportId: string) => {
@@ -269,6 +303,7 @@ export default function Explorer() {
         // using the same machinery as a normal analysis.
         followUpTargetRef.current[meta.id] = reportId;
         setFollowUpText("");
+        setSelectedDoc(null);
         setSelectedId(meta.id);
         openJob(meta.id);
       } catch {
@@ -371,29 +406,75 @@ export default function Explorer() {
                 ].filter(Boolean);
                 return (
                   <li key={r.id}>
-                    <button
-                      onClick={() => onSelect(r)}
-                      className={`block w-full px-4 py-3 text-left transition-colors ${
-                        selected ? "bg-panel-2" : "hover:bg-panel-2/60"
-                      }`}
-                    >
-                      <div className="flex items-center gap-2">
-                        <StatusDot status={r.status} />
-                        <span className="truncate text-sm text-text">
-                          {r.title}
-                        </span>
+                    <div className="group relative">
+                      <button
+                        onClick={() => onSelect(r)}
+                        className={`block w-full px-4 py-3 pr-9 text-left transition-colors ${
+                          selected ? "bg-panel-2" : "hover:bg-panel-2/60"
+                        }`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <StatusDot status={r.status} />
+                          <span className="truncate text-sm text-text">
+                            {r.title}
+                          </span>
+                        </div>
+                        <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted">
+                          <span className="rounded-full border border-border px-1.5 py-px uppercase tracking-wide">
+                            {r.mode}
+                          </span>
+                          <span>{fmtDate(r.createdAt)}</span>
+                          {r.status === "running" && (
+                            <span className="text-accent">running…</span>
+                          )}
+                          {meta.length > 0 && <span>· {meta.join(" · ")}</span>}
+                        </div>
+                      </button>
+                      <button
+                        onClick={() => void deleteReportById(r)}
+                        title="Delete analysis"
+                        aria-label="Delete analysis"
+                        className="absolute right-2 top-2.5 rounded p-1 text-sm leading-none text-muted opacity-0 transition-opacity hover:bg-panel-2 hover:text-bad group-hover:opacity-100"
+                      >
+                        ×
+                      </button>
+                    </div>
+                    {selected && r.followUps && r.followUps.length > 0 && (
+                      <div className="border-t border-border px-3 pb-2 pt-1">
+                        <div className="flex items-center justify-between py-1">
+                          <span className="text-[10px] font-medium uppercase tracking-wide text-muted">
+                            Follow-ups
+                          </span>
+                          <button
+                            onClick={() => jumpToDoc(r.id, null)}
+                            className={`text-[10px] ${
+                              selectedDoc === null
+                                ? "text-accent"
+                                : "text-muted hover:text-text"
+                            }`}
+                          >
+                            Overview
+                          </button>
+                        </div>
+                        <ul className="space-y-0.5">
+                          {r.followUps.map((f) => (
+                            <li key={f.slug}>
+                              <button
+                                onClick={() => jumpToDoc(r.id, f.slug)}
+                                title={f.request}
+                                className={`block w-full truncate rounded px-2 py-1 text-left text-xs hover:bg-panel-2 ${
+                                  selectedDoc === f.slug
+                                    ? "text-accent"
+                                    : "text-muted hover:text-text"
+                                }`}
+                              >
+                                {f.request}
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
                       </div>
-                      <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted">
-                        <span className="rounded-full border border-border px-1.5 py-px uppercase tracking-wide">
-                          {r.mode}
-                        </span>
-                        <span>{fmtDate(r.createdAt)}</span>
-                        {r.status === "running" && (
-                          <span className="text-accent">running…</span>
-                        )}
-                        {meta.length > 0 && <span>· {meta.join(" · ")}</span>}
-                      </div>
-                    </button>
+                    )}
                   </li>
                 );
               })}
@@ -459,6 +540,55 @@ export default function Explorer() {
             {formError}
           </div>
         )}
+        {dupe && (
+          <div className="flex flex-wrap items-center gap-2 border-b border-border bg-panel px-4 py-2 text-sm text-text">
+            <span>
+              You’ve already analyzed{" "}
+              <span className="font-medium">{dupe.existing.title}</span>.
+            </span>
+            <button
+              onClick={() => {
+                const ex = dupe.existing;
+                const steer = dupe.steeringText;
+                setDupe(null);
+                setSelectedDoc(null);
+                setSelectedId(ex.id);
+                if (steer) setFollowUpText(steer);
+              }}
+              className="rounded-md border border-border px-2.5 py-1 text-xs hover:bg-panel-2"
+            >
+              Ask a follow-up
+            </button>
+            <button
+              onClick={() => {
+                const ex = dupe.existing;
+                const steer = dupe.steeringText;
+                setDupe(null);
+                void (async () => {
+                  try {
+                    await fetch(`/api/reports/${ex.id}`, { method: "DELETE" });
+                  } catch {
+                    /* best effort */
+                  }
+                  setReports((prev) => prev.filter((x) => x.id !== ex.id));
+                  reportsRef.current = reportsRef.current.filter(
+                    (x) => x.id !== ex.id,
+                  );
+                  await startAnalysis(ex.repos, steer, true);
+                })();
+              }}
+              className="rounded-md border border-bad/40 px-2.5 py-1 text-xs text-bad hover:bg-bad/10"
+            >
+              Delete &amp; start over
+            </button>
+            <button
+              onClick={() => setDupe(null)}
+              className="text-xs text-muted hover:text-text"
+            >
+              Cancel
+            </button>
+          </div>
+        )}
 
         {/* Content */}
         <div className="min-h-0 flex-1">
@@ -500,8 +630,8 @@ export default function Explorer() {
                 </div>
               )}
               <iframe
-                key={`${selectedId}:${refreshNonce}`}
-                src={`/api/reports/${selectedId}`}
+                key={`${selectedId}:${selectedDoc ?? "index"}:${refreshNonce}`}
+                src={`/api/reports/${selectedId}${selectedDoc ? `/${selectedDoc}` : ""}`}
                 title="Report"
                 sandbox="allow-popups allow-popups-to-escape-sandbox"
                 className="w-full flex-1 border-0 bg-white"
@@ -512,7 +642,7 @@ export default function Explorer() {
                     ref={followUpRef}
                     value={followUpText}
                     onChange={(e) => setFollowUpText(e.target.value)}
-                    placeholder="Ask a follow-up and append it to this report — e.g. “dig deeper into their auth and add a section”"
+                    placeholder="Ask a follow-up — added as a new document to this report — e.g. “dig deeper into their auth”"
                     className="min-h-20 min-w-0 flex-1 resize-none overflow-hidden rounded-md border border-border bg-bg px-3 py-2 text-sm text-text outline-none placeholder:text-muted focus:border-accent"
                     onKeyDown={(e) => {
                       if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
@@ -526,7 +656,7 @@ export default function Explorer() {
                     disabled={!followUpText.trim() || submittingFollowUp}
                     className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-bg transition-opacity hover:opacity-90 disabled:opacity-50"
                   >
-                    {submittingFollowUp ? "Starting…" : "Append"}
+                    {submittingFollowUp ? "Starting…" : "Ask"}
                   </button>
                 </div>
               )}

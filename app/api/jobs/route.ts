@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { startJob } from "@/lib/jobs";
+import { findExistingReport } from "@/lib/store";
 
 export const runtime = "nodejs";
 
@@ -46,6 +47,16 @@ export async function POST(req: NextRequest) {
   const steeringText =
     typeof rawSteering === "string" ? rawSteering.trim().slice(0, 500) : "";
 
-  const meta = startJob(urls, steeringText || undefined);
+  // Analysis is keyed by repo: if this repo was already analyzed, surface the
+  // existing report so the UI can offer "follow-up" vs "delete & start over".
+  const force = (body as { force?: unknown })?.force === true;
+  if (!force) {
+    const existing = await findExistingReport(urls);
+    if (existing) {
+      return NextResponse.json({ existing }, { status: 409 });
+    }
+  }
+
+  const meta = await startJob(urls, steeringText || undefined);
   return NextResponse.json(meta, { status: 201 });
 }
