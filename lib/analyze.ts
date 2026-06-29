@@ -1,6 +1,10 @@
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import type { ProgressEvent } from "./types";
 
+// The default analysis model. Parameterized through streamQuery so a future
+// model-selection feature only needs to thread a value here.
+const DEFAULT_MODEL = "claude-opus-4-8";
+
 export interface AnalyzeOptions {
   urls: string[]; // 1 = single review, 2 = comparison
   outFile: string; // absolute path the report must be written to
@@ -9,10 +13,20 @@ export interface AnalyzeOptions {
   onEvent: (e: ProgressEvent) => void;
 }
 
+export interface FollowUpOptions {
+  reportPath: string; // absolute path of the existing report to append to
+  repos: string[]; // original sources (for re-cloning if the request needs files)
+  request: string; // the user's follow-up request
+  resume?: string; // prior session id to resume, when available
+  appRoot: string; // cwd; the dir whose .claude/skills/ holds the vendored skill
+  onEvent: (e: ProgressEvent) => void;
+}
+
 export interface AnalyzeResult {
   ok: boolean;
   costUsd?: number;
   error?: string;
+  sessionId?: string; // captured so follow-ups can resume this conversation
 }
 
 function buildPrompt(urls: string[], outFile: string, steeringText?: string): string {
@@ -33,6 +47,20 @@ function buildPrompt(urls: string[], outFile: string, steeringText?: string): st
   ]
     .filter(Boolean)
     .join(" ");
+}
+
+function buildFollowUpPrompt(reportPath: string, repos: string[], request: string): string {
+  const subject = repos.length === 2 ? `${repos[0]} and ${repos[1]}` : repos[0];
+  return [
+    `This is a follow-up to an architectural review you produced for ${subject}.`,
+    `The existing HTML report is saved at this exact absolute path: ${reportPath}.`,
+    `Read that file first so you match its existing house style — the same CSS classes, dark theme, voice, and citation format already in the document.`,
+    `The user's follow-up request: ${request}`,
+    `Append a single new <section> to that report, inserted immediately before the closing </body> tag, with a heading that names the follow-up (for example "Follow-up: ${request}").`,
+    `Do not rewrite, reorder, or remove any existing sections — only add the new one. Keep the file a single self-contained HTML document with no external assets.`,
+    `Use what you already know from this session first. Only if the request requires reading repository files you don't already have, shallow-clone the source(s) to a temporary directory and discard the clone when finished; do not ask whether to keep it.`,
+    `Do not run any keep-clone prompt. When done, the updated file at ${reportPath} is the only output.`,
+  ].join(" ");
 }
 
 function truncate(s: string, n = 200): string {
@@ -84,33 +112,49 @@ function toolStatus(name: string, input: Record<string, unknown>): string | unde
   return undefined;
 }
 
-export async function runAnalysis(opts: AnalyzeOptions): Promise<AnalyzeResult> {
-  const prompt = buildPrompt(opts.urls, opts.outFile, opts.steeringText);
+interface StreamQueryOptions {
+  prompt: string;
+  appRoot: string;
+  resume?: string; // resume a prior session instead of starting fresh
+  model?: string;
+  startLabel?: string;
+  onEvent: (e: ProgressEvent) => void;
+}
+
+/**
+ * Drive a single Agent SDK `query()` run: stream its messages, translate them
+ * into ProgressEvents, and return the outcome (including the session id so a
+ * follow-up can resume the conversation). Shared by runAnalysis + runFollowUp.
+ */
+async function streamQuery(opts: StreamQueryOptions): Promise<AnalyzeResult> {
+  const { prompt, appRoot, resume, model = DEFAULT_MODEL, onEvent } = opts;
   let lastStatus = "";
   const emitStatus = (text: string) => {
     if (text && text !== lastStatus) {
       lastStatus = text;
-      opts.onEvent({ type: "status", text });
+      onEvent({ type: "status", text });
     }
   };
 
-  emitStatus("Starting analysis…");
+  emitStatus(opts.startLabel ?? "Starting analysis…");
   // If token-streaming works for a kind, skip the duplicate complete-message block
   // for that kind. Tracked per-kind so a fallback can't drop the other.
   let sawTextDelta = false;
   let sawThinkingDelta = false;
+  let sessionId: string | undefined;
 
   try {
     for await (const msg of query({
       prompt,
       options: {
-        cwd: opts.appRoot,
+        cwd: appRoot,
         settingSources: ["project"], // discover .claude/skills from the app, not ~/.claude
         skills: ["explore-repo"],
         permissionMode: "bypassPermissions",
         allowDangerouslySkipPermissions: true,
         includePartialMessages: true, // stream thinking/text token-by-token
-        model: "claude-opus-4-8",
+        model,
+        ...(resume ? { resume } : {}),
       },
     })) {
       // Live token deltas — the "document revealing itself" feed.
@@ -122,10 +166,10 @@ export async function runAnalysis(opts: AnalyzeOptions): Promise<AnalyzeResult> 
         if (ev.type === "content_block_delta" && ev.delta) {
           if (ev.delta.type === "text_delta" && ev.delta.text) {
             sawTextDelta = true;
-            opts.onEvent({ type: "text", text: ev.delta.text });
+            onEvent({ type: "text", text: ev.delta.text });
           } else if (ev.delta.type === "thinking_delta" && ev.delta.thinking) {
             sawThinkingDelta = true;
-            opts.onEvent({ type: "thinking", text: ev.delta.thinking });
+            onEvent({ type: "thinking", text: ev.delta.thinking });
           }
         }
         continue;
@@ -137,7 +181,7 @@ export async function runAnalysis(opts: AnalyzeOptions): Promise<AnalyzeResult> 
           for (const block of content) {
             if (block.type === "tool_use") {
               const input = (block.input ?? {}) as Record<string, unknown>;
-              opts.onEvent({
+              onEvent({
                 type: "tool",
                 tool: block.name,
                 detail: toolDetail(block.name, input),
@@ -150,32 +194,51 @@ export async function runAnalysis(opts: AnalyzeOptions): Promise<AnalyzeResult> 
               block.text.trim()
             ) {
               // Fallback when token streaming isn't available.
-              opts.onEvent({ type: "text", text: block.text.trim() });
+              onEvent({ type: "text", text: block.text.trim() });
             } else if (
               !sawThinkingDelta &&
               block.type === "thinking" &&
               block.thinking?.trim()
             ) {
-              opts.onEvent({ type: "thinking", text: block.thinking.trim() });
+              onEvent({ type: "thinking", text: block.thinking.trim() });
             }
           }
         }
       } else if (msg.type === "result") {
         if (msg.subtype === "success") {
-          opts.onEvent({ type: "done", ok: true, costUsd: msg.total_cost_usd });
-          return { ok: true, costUsd: msg.total_cost_usd };
+          sessionId = msg.session_id;
+          onEvent({ type: "done", ok: true, costUsd: msg.total_cost_usd });
+          return { ok: true, costUsd: msg.total_cost_usd, sessionId };
         }
         const error = `Agent ended: ${msg.subtype}`;
-        opts.onEvent({ type: "done", ok: false, error });
-        return { ok: false, error };
+        onEvent({ type: "done", ok: false, error });
+        return { ok: false, error, sessionId };
       }
     }
     const error = "Agent stream ended without a result";
-    opts.onEvent({ type: "done", ok: false, error });
-    return { ok: false, error };
+    onEvent({ type: "done", ok: false, error });
+    return { ok: false, error, sessionId };
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err);
-    opts.onEvent({ type: "done", ok: false, error });
-    return { ok: false, error };
+    onEvent({ type: "done", ok: false, error });
+    return { ok: false, error, sessionId };
   }
+}
+
+export async function runAnalysis(opts: AnalyzeOptions): Promise<AnalyzeResult> {
+  return streamQuery({
+    prompt: buildPrompt(opts.urls, opts.outFile, opts.steeringText),
+    appRoot: opts.appRoot,
+    onEvent: opts.onEvent,
+  });
+}
+
+export async function runFollowUp(opts: FollowUpOptions): Promise<AnalyzeResult> {
+  return streamQuery({
+    prompt: buildFollowUpPrompt(opts.reportPath, opts.repos, opts.request),
+    appRoot: opts.appRoot,
+    resume: opts.resume,
+    startLabel: "Starting follow-up…",
+    onEvent: opts.onEvent,
+  });
 }
