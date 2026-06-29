@@ -13,6 +13,7 @@ export interface ReportMeta {
   costUsd?: number;
   durationMs?: number; // wall-clock time the analysis actually ran
   steeringText?: string; // optional user focus/intent for this run
+  sessionId?: string; // Agent SDK session id, so follow-ups can resume the conversation
 }
 
 /** A repo from github.com/trending (ephemeral, not persisted). */

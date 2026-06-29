@@ -41,6 +41,10 @@ export default function Explorer() {
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
+  const [followUpText, setFollowUpText] = useState("");
+  const [submittingFollowUp, setSubmittingFollowUp] = useState(false);
+  const [refreshNonce, setRefreshNonce] = useState(0);
+
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const [activeStatus, setActiveStatus] = useState<ActiveStatus>(null);
   const [progress, setProgress] = useState<ProgressEvent[]>([]);
@@ -60,6 +64,9 @@ export default function Explorer() {
   const reportsRef = useRef<ReportMeta[]>([]);
   const activeJobRef = useRef<string | null>(null);
   const attachedRef = useRef(false);
+  // follow-up job id -> the report id its output should fold back into.
+  const followUpTargetRef = useRef<Record<string, string>>({});
+  const followUpRef = useRef<HTMLTextAreaElement | null>(null);
 
   const loadReports = useCallback(async () => {
     try {
@@ -92,6 +99,16 @@ export default function Explorer() {
           es.close();
           setActiveStatus(ev.ok ? "done" : "error");
           void loadReports();
+          // A finished follow-up folds back into its target report: re-select it
+          // and bump the nonce so the iframe refetches the appended HTML.
+          const target = followUpTargetRef.current[id];
+          if (target) {
+            delete followUpTargetRef.current[id];
+            if (ev.ok) {
+              setSelectedId(target);
+              setRefreshNonce((n) => n + 1);
+            }
+          }
         }
       };
       es.onerror = () => {
@@ -161,6 +178,14 @@ export default function Explorer() {
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
   }, [progress]);
 
+  // Grow the follow-up textarea to fit its content — no inner scrollbar.
+  useEffect(() => {
+    const el = followUpRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  }, [followUpText, selectedId]);
+
   const startAnalysis = useCallback(
     async (urls: string[], steeringText?: string) => {
       setFormError(null);
@@ -220,6 +245,39 @@ export default function Explorer() {
       }
     },
     [openJob],
+  );
+
+  const submitFollowUp = useCallback(
+    async (reportId: string) => {
+      const request = followUpText.trim();
+      if (!request || submittingFollowUp) return;
+      setSubmittingFollowUp(true);
+      setFormError(null);
+      try {
+        const res = await fetch("/api/followup", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ reportId, request }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          setFormError(data?.error ?? "Failed to start follow-up.");
+          return;
+        }
+        const meta = data as ReportMeta;
+        // Remember where this follow-up's output belongs, then stream it live
+        // using the same machinery as a normal analysis.
+        followUpTargetRef.current[meta.id] = reportId;
+        setFollowUpText("");
+        setSelectedId(meta.id);
+        openJob(meta.id);
+      } catch {
+        setFormError("Network error starting follow-up.");
+      } finally {
+        setSubmittingFollowUp(false);
+      }
+    },
+    [followUpText, submittingFollowUp, openJob],
   );
 
   const loadTrending = useCallback(async (s: Since) => {
@@ -442,12 +500,36 @@ export default function Explorer() {
                 </div>
               )}
               <iframe
-                key={selectedId}
+                key={`${selectedId}:${refreshNonce}`}
                 src={`/api/reports/${selectedId}`}
                 title="Report"
                 sandbox="allow-popups allow-popups-to-escape-sandbox"
                 className="w-full flex-1 border-0 bg-white"
               />
+              {selectedReport?.status === "done" && (
+                <div className="flex items-end gap-2 border-t border-border bg-panel px-4 py-3">
+                  <textarea
+                    ref={followUpRef}
+                    value={followUpText}
+                    onChange={(e) => setFollowUpText(e.target.value)}
+                    placeholder="Ask a follow-up and append it to this report — e.g. “dig deeper into their auth and add a section”"
+                    className="min-h-20 min-w-0 flex-1 resize-none overflow-hidden rounded-md border border-border bg-bg px-3 py-2 text-sm text-text outline-none placeholder:text-muted focus:border-accent"
+                    onKeyDown={(e) => {
+                      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+                        e.preventDefault();
+                        void submitFollowUp(selectedId);
+                      }
+                    }}
+                  />
+                  <button
+                    onClick={() => void submitFollowUp(selectedId)}
+                    disabled={!followUpText.trim() || submittingFollowUp}
+                    className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-bg transition-opacity hover:opacity-90 disabled:opacity-50"
+                  >
+                    {submittingFollowUp ? "Starting…" : "Append"}
+                  </button>
+                </div>
+              )}
             </div>
           ) : (
             <div className="flex h-full items-center justify-center px-6 text-center text-sm text-muted">
