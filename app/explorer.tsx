@@ -670,6 +670,17 @@ export default function Explorer() {
                       </button>
                     </span>
                   )}
+                  {selectedReport.status === "error" &&
+                    /usage limit|401|unauthoriz|authenticat|credit|billing/i.test(
+                      selectedReport.error ?? "",
+                    ) && (
+                      <span className="basis-full text-muted">
+                        Looks like an auth/usage issue — run{" "}
+                        <span className="text-accent">pnpm launch</span> to switch between
+                        your Claude subscription and an API key, then restart the dev
+                        server.
+                      </span>
+                    )}
                 </div>
               )}
               <iframe
