@@ -2,6 +2,8 @@ import { EventEmitter } from "events";
 import { randomUUID } from "crypto";
 import { runAnalysis, runFollowUp } from "./analyze";
 import {
+  adoptDocIfMissing,
+  ensureReportDir,
   getReport,
   listFollowUpSlugs,
   readIndex,
@@ -118,6 +120,8 @@ async function runJob(job: Job): Promise<void> {
     job.emitter.emit("event", e);
   };
 
+  await ensureReportDir(job.id); // so the agent writes into an existing folder
+
   const result = await runAnalysis({
     urls: job.meta.repos,
     outFile: reportDocPath(job.id, "index"),
@@ -126,10 +130,16 @@ async function runJob(job: Job): Promise<void> {
     onEvent: emit,
   });
 
-  // Bake a source-repo reference into the saved file so it's self-contained.
-  if (result.ok) {
+  // The agent reports success; confirm a report file actually landed (adopting a
+  // stray filename if needed). A "done" with no file would be a ghost report.
+  let ok = result.ok;
+  if (ok) {
+    await adoptDocIfMissing(job.id, "index");
     const html = await readReportDoc(job.id, "index");
-    if (html && !html.includes(SOURCE_MARKER)) {
+    if (!html) {
+      ok = false;
+    } else if (!html.includes(SOURCE_MARKER)) {
+      // Bake a source-repo reference in so the saved file is self-contained.
       const out = html.replace(
         /<body([^>]*)>/i,
         `<body$1>${sourceBannerHtml(job.meta.repos)}`,
@@ -140,8 +150,10 @@ async function runJob(job: Job): Promise<void> {
 
   job.meta = {
     ...job.meta,
-    status: result.ok ? "done" : "error",
-    error: result.error,
+    status: ok ? "done" : "error",
+    error: ok
+      ? undefined
+      : result.error ?? "The analysis finished but no report file was written.",
     costUsd: result.costUsd,
     durationMs: Date.now() - startedAt,
     sessionId: result.sessionId ?? job.meta.sessionId,
@@ -203,6 +215,7 @@ async function runFollowUpJob(job: Job): Promise<void> {
     job.emitter.emit("event", e);
   };
   const { targetReportId, request, docSlug, original } = job.followUp!;
+  await ensureReportDir(targetReportId);
 
   const result = await runFollowUp({
     outPath: reportDocPath(targetReportId, docSlug),
@@ -214,10 +227,13 @@ async function runFollowUpJob(job: Job): Promise<void> {
     onEvent: emit,
   });
 
-  // Keep the new doc self-contained with its own source banner.
-  if (result.ok) {
+  // Confirm the follow-up doc actually landed before recording it.
+  let ok = result.ok;
+  if (ok) {
     const html = await readReportDoc(targetReportId, docSlug);
-    if (html && !html.includes(SOURCE_MARKER)) {
+    if (!html) {
+      ok = false;
+    } else if (!html.includes(SOURCE_MARKER)) {
       const out = html.replace(
         /<body([^>]*)>/i,
         `<body$1>${sourceBannerHtml(original.repos)}`,
@@ -226,14 +242,13 @@ async function runFollowUpJob(job: Job): Promise<void> {
     }
   }
 
-  // Record the follow-up on the ORIGINAL report: list it, accumulate cost,
-  // refresh the session id. A failed follow-up leaves the report untouched.
+  // Record the follow-up on the ORIGINAL report only if its doc was written.
   const latest = (await getReport(targetReportId)) ?? original;
   await upsertReport({
     ...latest,
     costUsd: (latest.costUsd ?? 0) + (result.costUsd ?? 0),
     sessionId: result.sessionId ?? latest.sessionId,
-    ...(result.ok
+    ...(ok
       ? {
           followUps: [
             ...(latest.followUps ?? []),
@@ -245,8 +260,10 @@ async function runFollowUpJob(job: Job): Promise<void> {
 
   job.meta = {
     ...job.meta,
-    status: result.ok ? "done" : "error",
-    error: result.error,
+    status: ok ? "done" : "error",
+    error: ok
+      ? undefined
+      : result.error ?? "The follow-up finished but no document was written.",
     costUsd: result.costUsd,
     durationMs: Date.now() - startedAt,
   };

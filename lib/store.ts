@@ -108,6 +108,41 @@ export async function writeReportDoc(
   await fs.writeFile(reportDocPath(id, doc), html, "utf8");
 }
 
+/** Ensure the report folder exists so the agent can write its doc into it. */
+export async function ensureReportDir(id: string): Promise<void> {
+  await fs.mkdir(reportDir(id), { recursive: true });
+}
+
+/**
+ * If `<doc>.html` is missing but the agent wrote some other .html into the
+ * folder (e.g. under the skill's own naming), adopt the newest one as `<doc>`.
+ * Returns true if the doc exists afterward.
+ */
+export async function adoptDocIfMissing(id: string, doc: string): Promise<boolean> {
+  try {
+    await fs.access(reportDocPath(id, doc));
+    return true;
+  } catch {
+    /* not there — try to adopt a stray html */
+  }
+  try {
+    const dir = reportDir(id);
+    const htmls = (await fs.readdir(dir)).filter((f) => f.endsWith(".html"));
+    if (htmls.length === 0) return false;
+    const withTimes = await Promise.all(
+      htmls.map(async (f) => ({
+        f,
+        m: (await fs.stat(path.join(dir, f))).mtimeMs,
+      })),
+    );
+    withTimes.sort((a, b) => b.m - a.m);
+    await fs.rename(path.join(dir, withTimes[0].f), reportDocPath(id, doc));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Follow-up doc slugs already present in a report folder (excludes index). */
 export async function listFollowUpSlugs(id: string): Promise<string[]> {
   try {

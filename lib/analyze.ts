@@ -41,8 +41,8 @@ function buildPrompt(urls: string[], outFile: string, steeringText?: string): st
     steering
       ? `The user has asked you to focus on: ${steering} — prioritize this throughout the investigation and weight the report toward it, while still covering the essential structure.`
       : null,
-    `Write the single HTML report to this exact absolute path: ${outFile}`,
-    `— this overrides the skill's default ~/repos/ location and naming. Do not write the report anywhere else.`,
+    `Write the single HTML report to this exact absolute path: ${outFile} (its directory already exists).`,
+    `This overrides the skill's default ~/repos/ location and naming: use this exact filename, overwrite it if it already exists, and do NOT add any "-2"/numeric suffix. Do not write the report anywhere else.`,
     `Clone each remote repo to a temporary directory and always discard it when finished;`,
     `do not ask whether to keep the clone, and do not leave anything behind.`,
   ]
@@ -61,7 +61,7 @@ function buildFollowUpPrompt(
     `This is a follow-up to an architectural review you produced for ${subject}.`,
     `The original report's overview is at this exact absolute path: ${basePath}. Read it first so you match its house style — the same CSS classes, dark theme, voice, and citation format.`,
     `The user's follow-up request: ${request}`,
-    `Write a NEW, self-contained HTML document that answers the request to this exact absolute path: ${outPath}. Use the same dark-theme house style as the overview, lead with a clear heading that names the follow-up, and include today's date near the top.`,
+    `Write a NEW, self-contained HTML document that answers the request to this exact absolute path: ${outPath} (its directory already exists; use this exact filename, overwrite it if present, and do not add any numeric suffix). Use the same dark-theme house style as the overview, lead with a clear heading that names the follow-up, and include today's date near the top.`,
     `Do not modify ${basePath} or any other file — ${outPath} is the only file you create.`,
     `Use what you already know from this session first. Only if the request requires reading repository files you don't already have, shallow-clone the source(s) to a temporary directory and discard the clone when finished; do not ask whether to keep it. Do not run any keep-clone prompt.`,
   ].join(" ");
