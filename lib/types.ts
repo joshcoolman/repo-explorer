@@ -12,6 +12,7 @@ export interface ReportMeta {
   error?: string;
   costUsd?: number;
   durationMs?: number; // wall-clock time the analysis actually ran
+  steeringText?: string; // optional user focus/intent for this run
 }
 
 /** A repo from github.com/trending (ephemeral, not persisted). */
