@@ -23,7 +23,45 @@ machine, so don't expose it publicly.
 - Node 20.9+ and `git` on your PATH
 - An Anthropic API key (billing is on your key)
 
-## Setup
+## Quick start
+
+Three steps, all in the terminal — no editor required.
+
+**1. Get into the repo:**
+
+```bash
+git clone https://github.com/<you>/repo-explorer.git
+cd repo-explorer
+```
+
+**2. Run the launcher:**
+
+```bash
+pnpm launch
+```
+
+**3. Paste your Anthropic API key when prompted — and you're done.**
+
+That's it. `pnpm launch` does the rest: it checks prerequisites, installs
+dependencies, verifies your key, writes `.env.local`, starts the dev server, and
+opens http://localhost:3000 in your browser.
+
+> Don't have a key? Grab one at <https://console.anthropic.com/> → **API keys**.
+> Billing runs on your key, and it never leaves your machine.
+
+**Run it again any time.** Once set up, `pnpm launch` skips straight to launching.
+It's also port-aware: if something is already on port 3000 it works out whether
+that's an existing Repo Explorer (and just points you at it) or another process (and
+offers to kill it or pick a different port) — so you never end up with duplicate
+instances scattered across ports.
+
+Then enter `owner/repo`, a full `https://github.com/owner/repo` URL, or two repos to
+compare. Progress streams live; finished reports render in a sandboxed iframe and
+appear in the sidebar.
+
+## Manual setup
+
+If you'd rather wire it up by hand instead of using `pnpm launch`:
 
 ```bash
 pnpm install
@@ -36,17 +74,11 @@ cp .env.example .env.local   # then put your key in .env.local
 ANTHROPIC_API_KEY=sk-ant-...
 ```
 
-## Run
-
 ```bash
 pnpm dev         # http://localhost:3000
 # or
 pnpm build && pnpm start
 ```
-
-Enter `owner/repo`, a full `https://github.com/owner/repo` URL, or two repos to
-compare. Progress streams live; finished reports render in a sandboxed iframe and
-appear in the sidebar.
 
 ## How it works
 

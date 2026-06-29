@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "launch": "node scripts/launch.mjs",
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
@@ -16,6 +17,7 @@
     "react-dom": "19.2.4"
   },
   "devDependencies": {
+    "@inquirer/prompts": "^8.5.2",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",
