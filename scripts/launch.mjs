@@ -238,10 +238,15 @@ async function ensureDeps() {
   ok("dependencies installed");
 }
 
-function readConfiguredKey() {
+// The currently-configured auth in .env.local, if any.
+function readConfiguredAuth() {
   if (!fs.existsSync(envLocal)) return null;
-  const m = fs.readFileSync(envLocal, "utf8").match(/^ANTHROPIC_API_KEY=(.+)$/m);
-  return m && m[1].trim() ? m[1].trim() : null;
+  const content = fs.readFileSync(envLocal, "utf8");
+  const sub = content.match(/^CLAUDE_CODE_OAUTH_TOKEN=(.+)$/m);
+  if (sub && sub[1].trim()) return { method: "subscription" };
+  const api = content.match(/^ANTHROPIC_API_KEY=(.+)$/m);
+  if (api && api[1].trim()) return { method: "api" };
+  return null;
 }
 
 async function validateKey(key) {
@@ -258,15 +263,78 @@ async function validateKey(key) {
   }
 }
 
-async function configureKey() {
-  step(3, "Anthropic API key");
+async function configureAuth() {
+  step(3, "Authentication");
 
-  if (readConfiguredKey()) {
-    ok(".env.local already has ANTHROPIC_API_KEY — skipping");
-    return;
+  const { input, confirm, select } = await loadPrompts();
+  const existing = readConfiguredAuth();
+
+  if (existing) {
+    const label =
+      existing.method === "subscription"
+        ? "a Claude subscription token"
+        : "an Anthropic API key";
+    ok(`.env.local already has ${label}`);
+    const action = await select({
+      message: "Keep it, or switch authentication method?",
+      choices: [
+        { name: "Keep it", value: "keep" },
+        { name: "Switch / reconfigure", value: "switch" },
+      ],
+    });
+    if (action === "keep") return;
+  } else {
+    info("Repo Explorer authenticates the Claude Agent SDK one of two ways.");
   }
 
-  const { input, confirm } = await loadPrompts();
+  const method = await select({
+    message: "How do you want to authenticate?",
+    choices: [
+      {
+        name: "Claude subscription (Pro/Max) — recommended, runs on your plan",
+        value: "subscription",
+      },
+      { name: "Anthropic API key — pay-per-token", value: "api" },
+    ],
+  });
+
+  if (method === "subscription") {
+    await configureSubscription(input);
+  } else {
+    await configureApiKey(input, confirm);
+  }
+}
+
+async function configureSubscription(input) {
+  try {
+    execFileSync("claude", ["--version"], { stdio: "ignore" });
+  } catch {
+    die(
+      "The `claude` CLI isn't on PATH. Install Claude Code and re-run `pnpm launch` — " +
+        "or re-run and choose the API key option instead.",
+    );
+  }
+  info("This mints a long-lived token from your Claude Pro/Max subscription.");
+  info("A browser will open to log in; the token is printed back in this terminal.\n");
+
+  const code = await spawnInherit("claude", ["setup-token"]);
+  if (code !== 0) {
+    die("`claude setup-token` didn't complete. Re-run `pnpm launch` to try again.");
+  }
+
+  await flushStdin();
+  const token = (
+    await input({
+      message: "Paste the token it printed above:",
+      validate: (v) => (v.trim().length > 0 ? true : "Paste the token, or Ctrl-C to abort."),
+    })
+  ).trim();
+
+  writeAuthEnv("subscription", token);
+  ok("subscription token saved — runs draw on your Claude plan, not metered API billing");
+}
+
+async function configureApiKey(input, confirm) {
   info("Billing runs on this key. It's written to .env.local and never leaves your machine.");
   info("Get one at https://console.anthropic.com/ → API keys.\n");
 
@@ -288,13 +356,13 @@ async function configureKey() {
     const result = await withSpinner("verifying key", () => validateKey(key));
     if (result.ok === true) {
       ok("key verified");
-      writeEnvLocal(key);
+      writeAuthEnv("api", key);
       return;
     }
     if (result.ok === null) {
       warn(result.reason);
       if (await confirm({ message: "Use this key anyway?", default: false })) {
-        writeEnvLocal(key);
+        writeAuthEnv("api", key);
         return;
       }
       continue;
@@ -303,14 +371,27 @@ async function configureKey() {
   }
 }
 
-function writeEnvLocal(key) {
-  let tmpl = fs.existsSync(envExample)
-    ? fs.readFileSync(envExample, "utf8")
-    : "ANTHROPIC_API_KEY=\n";
-  if (/^ANTHROPIC_API_KEY=.*$/m.test(tmpl)) {
-    tmpl = tmpl.replace(/^ANTHROPIC_API_KEY=.*$/m, `ANTHROPIC_API_KEY=${key}`);
+// Set one env var to `value`, inserting it if absent.
+function setEnvVar(content, key, value) {
+  const line = `${key}=${value}`;
+  const re = new RegExp(`^${key}=.*$`, "m");
+  if (re.test(content)) return content.replace(re, line);
+  return `${content.replace(/\n*$/, "")}\n${line}\n`;
+}
+
+// Write the chosen auth credential and blank the other, so exactly one is active.
+function writeAuthEnv(method, value) {
+  let tmpl = fs.existsSync(envLocal)
+    ? fs.readFileSync(envLocal, "utf8")
+    : fs.existsSync(envExample)
+      ? fs.readFileSync(envExample, "utf8")
+      : "";
+  if (method === "subscription") {
+    tmpl = setEnvVar(tmpl, "CLAUDE_CODE_OAUTH_TOKEN", value);
+    tmpl = setEnvVar(tmpl, "ANTHROPIC_API_KEY", "");
   } else {
-    tmpl += `\nANTHROPIC_API_KEY=${key}\n`;
+    tmpl = setEnvVar(tmpl, "ANTHROPIC_API_KEY", value);
+    tmpl = setEnvVar(tmpl, "CLAUDE_CODE_OAUTH_TOKEN", "");
   }
   fs.writeFileSync(envLocal, tmpl);
   ok(".env.local written (gitignored)");
@@ -425,7 +506,7 @@ async function main() {
   banner();
   preflight();
   await ensureDeps();
-  await configureKey();
+  await configureAuth();
   await launch(DEFAULT_PORT);
 }
 

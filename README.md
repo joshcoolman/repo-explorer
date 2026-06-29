@@ -21,7 +21,8 @@ machine, so don't expose it publicly.
 ## Requirements
 
 - Node 20.9+ and `git` on your PATH
-- An Anthropic API key (billing is on your key)
+- One of: a **Claude Pro/Max subscription** (recommended — runs on your plan) or an
+  **Anthropic API key** (pay-per-token)
 
 ## Quick start
 
@@ -40,14 +41,21 @@ cd repo-explorer
 pnpm launch
 ```
 
-**3. Paste your Anthropic API key when prompted — and you're done.**
+**3. Pick how to authenticate when prompted — and you're done.**
 
-That's it. `pnpm launch` does the rest: it checks prerequisites, installs
-dependencies, verifies your key, writes `.env.local`, starts the dev server, and
-opens http://localhost:3000 in your browser.
+`pnpm launch` offers two options:
 
-> Don't have a key? Grab one at <https://console.anthropic.com/> → **API keys**.
-> Billing runs on your key, and it never leaves your machine.
+- **Claude subscription (Pro/Max)** — recommended. It runs `claude setup-token`,
+  you log in, and it stores a token that draws on your plan (no metered billing).
+- **Anthropic API key** — pay-per-token; paste your `sk-ant-…` key.
+
+That's it. `pnpm launch` does the rest: checks prerequisites, installs dependencies,
+writes `.env.local`, starts the dev server, and opens http://localhost:3000.
+
+> Only one method is active at a time. To **switch** (e.g. your API key is capped, or
+> your subscription is exhausted), just re-run `pnpm launch`, pick the other, and
+> restart the dev server. The credential lives in gitignored `.env.local` and never
+> leaves your machine.
 
 **Run it again any time.** Once set up, `pnpm launch` skips straight to launching.
 It's also port-aware: if something is already on port 3000 it works out whether
@@ -65,12 +73,15 @@ If you'd rather wire it up by hand instead of using `pnpm launch`:
 
 ```bash
 pnpm install
-cp .env.example .env.local   # then put your key in .env.local
+cp .env.example .env.local   # then set ONE credential in .env.local
 ```
 
-`.env.local`:
+`.env.local` — set exactly one:
 
 ```
+# Subscription (recommended): mint with `claude setup-token`
+CLAUDE_CODE_OAUTH_TOKEN=...
+# …or an API key:
 ANTHROPIC_API_KEY=sk-ant-...
 ```
 
