@@ -42,6 +42,10 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  const meta = startJob(urls);
+  const rawSteering = (body as { steeringText?: unknown })?.steeringText;
+  const steeringText =
+    typeof rawSteering === "string" ? rawSteering.trim().slice(0, 500) : "";
+
+  const meta = startJob(urls, steeringText || undefined);
   return NextResponse.json(meta, { status: 201 });
 }

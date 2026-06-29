@@ -5,6 +5,7 @@ export interface AnalyzeOptions {
   urls: string[]; // 1 = single review, 2 = comparison
   outFile: string; // absolute path the report must be written to
   appRoot: string; // cwd; the dir whose .claude/skills/ holds the vendored skill
+  steeringText?: string; // optional user focus/intent to prime the analysis
   onEvent: (e: ProgressEvent) => void;
 }
 
@@ -14,18 +15,24 @@ export interface AnalyzeResult {
   error?: string;
 }
 
-function buildPrompt(urls: string[], outFile: string): string {
+function buildPrompt(urls: string[], outFile: string, steeringText?: string): string {
   const compare = urls.length === 2;
   const subject = compare
     ? `${urls[0]} and compare with ${urls[1]}`
     : urls[0];
+  const steering = steeringText?.trim();
   return [
     `Use the explore-repo skill to analyze ${subject}.`,
+    steering
+      ? `The user has asked you to focus on: ${steering} — prioritize this throughout the investigation and weight the report toward it, while still covering the essential structure.`
+      : null,
     `Write the single HTML report to this exact absolute path: ${outFile}`,
     `— this overrides the skill's default ~/repos/ location and naming. Do not write the report anywhere else.`,
     `Clone each remote repo to a temporary directory and always discard it when finished;`,
     `do not ask whether to keep the clone, and do not leave anything behind.`,
-  ].join(" ");
+  ]
+    .filter(Boolean)
+    .join(" ");
 }
 
 function truncate(s: string, n = 200): string {
@@ -78,7 +85,7 @@ function toolStatus(name: string, input: Record<string, unknown>): string | unde
 }
 
 export async function runAnalysis(opts: AnalyzeOptions): Promise<AnalyzeResult> {
-  const prompt = buildPrompt(opts.urls, opts.outFile);
+  const prompt = buildPrompt(opts.urls, opts.outFile, opts.steeringText);
   let lastStatus = "";
   const emitStatus = (text: string) => {
     if (text && text !== lastStatus) {

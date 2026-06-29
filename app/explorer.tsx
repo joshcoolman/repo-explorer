@@ -37,6 +37,7 @@ export default function Explorer() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [urlA, setUrlA] = useState("");
   const [urlB, setUrlB] = useState("");
+  const [steering, setSteering] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
@@ -161,7 +162,7 @@ export default function Explorer() {
   }, [progress]);
 
   const startAnalysis = useCallback(
-    async (urls: string[]) => {
+    async (urls: string[], steeringText?: string) => {
       setFormError(null);
       setView("reports");
       if (urls.length === 0) {
@@ -173,7 +174,7 @@ export default function Explorer() {
         const res = await fetch("/api/jobs", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ urls }),
+          body: JSON.stringify({ urls, steeringText }),
         });
         const data = await res.json();
         if (!res.ok) {
@@ -201,11 +202,13 @@ export default function Explorer() {
     (e: { preventDefault: () => void }) => {
       e.preventDefault();
       const urls = [urlA, urlB].map((u) => u.trim()).filter(Boolean);
+      const steeringText = steering.trim() || undefined;
       setUrlA("");
       setUrlB("");
-      void startAnalysis(urls);
+      setSteering("");
+      void startAnalysis(urls, steeringText);
     },
-    [urlA, urlB, startAnalysis],
+    [urlA, urlB, steering, startAnalysis],
   );
 
   const onSelect = useCallback(
@@ -360,28 +363,38 @@ export default function Explorer() {
         {/* Form */}
         <form
           onSubmit={onSubmit}
-          className="flex flex-wrap items-center gap-2 border-b border-border bg-panel px-4 py-3"
+          className="flex flex-col gap-2 border-b border-border bg-panel px-4 py-3"
         >
-          <input
-            value={urlA}
-            onChange={(e) => setUrlA(e.target.value)}
-            placeholder="github.com/owner/repo  (or owner/repo)"
-            className="min-w-0 flex-1 rounded-md border border-border bg-bg px-3 py-2 text-sm text-text outline-none placeholder:text-muted focus:border-accent"
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              value={urlA}
+              onChange={(e) => setUrlA(e.target.value)}
+              placeholder="github.com/owner/repo  (or owner/repo)"
+              className="min-w-0 flex-1 rounded-md border border-border bg-bg px-3 py-2 text-sm text-text outline-none placeholder:text-muted focus:border-accent"
+            />
+            <span className="text-xs text-muted">compare with</span>
+            <input
+              value={urlB}
+              onChange={(e) => setUrlB(e.target.value)}
+              placeholder="optional second repo"
+              className="min-w-0 flex-1 rounded-md border border-border bg-bg px-3 py-2 text-sm text-text outline-none placeholder:text-muted focus:border-accent"
+            />
+            <button
+              type="submit"
+              disabled={submitting}
+              className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-bg transition-opacity hover:opacity-90 disabled:opacity-50"
+            >
+              {submitting ? "Starting…" : "Go"}
+            </button>
+          </div>
+          <textarea
+            value={steering}
+            onChange={(e) => setSteering(e.target.value)}
+            rows={2}
+            maxLength={500}
+            placeholder="Optional focus for this analysis — e.g. “focus on security”, “just the auth module”, “is it worth porting to Next?”"
+            className="w-full resize-y rounded-md border border-border bg-bg px-3 py-2 text-sm text-text outline-none placeholder:text-muted focus:border-accent"
           />
-          <span className="text-xs text-muted">compare with</span>
-          <input
-            value={urlB}
-            onChange={(e) => setUrlB(e.target.value)}
-            placeholder="optional second repo"
-            className="min-w-0 flex-1 rounded-md border border-border bg-bg px-3 py-2 text-sm text-text outline-none placeholder:text-muted focus:border-accent"
-          />
-          <button
-            type="submit"
-            disabled={submitting}
-            className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-bg transition-opacity hover:opacity-90 disabled:opacity-50"
-          >
-            {submitting ? "Starting…" : "Go"}
-          </button>
         </form>
         {formError && (
           <div className="border-b border-border bg-bad/10 px-4 py-2 text-sm text-bad">
@@ -421,6 +434,11 @@ export default function Explorer() {
                       </a>
                     );
                   })}
+                  {selectedReport.steeringText && (
+                    <span className="basis-full text-muted">
+                      Focus: {selectedReport.steeringText}
+                    </span>
+                  )}
                 </div>
               )}
               <iframe

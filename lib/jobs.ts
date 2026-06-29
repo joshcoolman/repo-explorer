@@ -49,7 +49,7 @@ export function subscribe(id: string, listener: (e: ProgressEvent) => void): () 
   return () => job.emitter.off("event", listener);
 }
 
-export function startJob(urls: string[]): ReportMeta {
+export function startJob(urls: string[], steeringText?: string): ReportMeta {
   const id = randomUUID();
   const meta: ReportMeta = {
     id,
@@ -58,6 +58,7 @@ export function startJob(urls: string[]): ReportMeta {
     repos: urls,
     createdAt: new Date().toISOString(),
     status: "running",
+    ...(steeringText ? { steeringText } : {}),
   };
 
   const job: Job = { id, meta, events: [], emitter: new EventEmitter(), done: false };
@@ -98,6 +99,7 @@ async function runJob(job: Job): Promise<void> {
     urls: job.meta.repos,
     outFile: reportHtmlPath(job.id),
     appRoot: process.cwd(),
+    steeringText: job.meta.steeringText,
     onEvent: emit,
   });
 
