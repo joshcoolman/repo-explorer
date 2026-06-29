@@ -290,6 +290,22 @@ export default function Explorer() {
     setSelectedDoc(null);
   }, []);
 
+  // Re-run a report with its saved repos + steering (e.g. after a failure) —
+  // nothing is lost because both are persisted on the report the moment Go is hit.
+  const rerunReport = useCallback(
+    async (r: ReportMeta) => {
+      try {
+        await fetch(`/api/reports/${r.id}`, { method: "DELETE" });
+      } catch {
+        /* best effort */
+      }
+      setReports((prev) => prev.filter((x) => x.id !== r.id));
+      reportsRef.current = reportsRef.current.filter((x) => x.id !== r.id);
+      await startAnalysis(r.repos, r.steeringText, true);
+    },
+    [startAnalysis],
+  );
+
   const submitFollowUp = useCallback(
     async (reportId: string) => {
       const request = followUpText.trim();
@@ -630,9 +646,28 @@ export default function Explorer() {
                       </a>
                     );
                   })}
+                  {selectedReport.status === "error" && (
+                    <button
+                      onClick={() => void rerunReport(selectedReport)}
+                      className="rounded-md border border-border px-2 py-0.5 text-[11px] text-text hover:bg-panel-2"
+                    >
+                      Retry analysis
+                    </button>
+                  )}
                   {selectedReport.steeringText && (
-                    <span className="basis-full text-muted">
-                      Focus: {selectedReport.steeringText}
+                    <span className="flex basis-full items-start gap-2 text-muted">
+                      <span>Focus: {selectedReport.steeringText}</span>
+                      <button
+                        onClick={() =>
+                          navigator.clipboard?.writeText(
+                            selectedReport.steeringText ?? "",
+                          )
+                        }
+                        title="Copy focus text"
+                        className="shrink-0 rounded border border-border px-1.5 py-0.5 text-[10px] text-muted hover:bg-panel-2 hover:text-text"
+                      >
+                        Copy
+                      </button>
                     </span>
                   )}
                 </div>

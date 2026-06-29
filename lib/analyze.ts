@@ -209,12 +209,21 @@ async function streamQuery(opts: StreamQueryOptions): Promise<AnalyzeResult> {
           }
         }
       } else if (msg.type === "result") {
-        if (msg.subtype === "success") {
-          sessionId = msg.session_id;
-          onEvent({ type: "done", ok: true, costUsd: msg.total_cost_usd });
-          return { ok: true, costUsd: msg.total_cost_usd, sessionId };
+        sessionId = msg.session_id ?? sessionId;
+        // The SDK reports API errors (e.g. usage limits) as subtype "success"
+        // with is_error: true and the message in `result` — treat those as errors.
+        const r = msg as unknown as {
+          subtype?: string;
+          is_error?: boolean;
+          result?: string;
+          total_cost_usd?: number;
+        };
+        const failed = r.subtype !== "success" || r.is_error === true;
+        if (!failed) {
+          onEvent({ type: "done", ok: true, costUsd: r.total_cost_usd });
+          return { ok: true, costUsd: r.total_cost_usd, sessionId };
         }
-        const error = `Agent ended: ${msg.subtype}`;
+        const error = r.result?.trim() || `Agent ended: ${r.subtype}`;
         onEvent({ type: "done", ok: false, error });
         return { ok: false, error, sessionId };
       }
