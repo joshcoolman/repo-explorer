@@ -44,8 +44,8 @@ export async function POST(req: NextRequest) {
   }
 
   const rawSteering = (body as { steeringText?: unknown })?.steeringText;
-  const steeringText =
-    typeof rawSteering === "string" ? rawSteering.trim().slice(0, 500) : "";
+  // No length cap — long, detailed steering is encouraged.
+  const steeringText = typeof rawSteering === "string" ? rawSteering.trim() : "";
 
   // Analysis is keyed by repo: if this repo was already analyzed, surface the
   // existing report so the UI can offer "follow-up" vs "delete & start over".

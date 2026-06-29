@@ -74,6 +74,7 @@ export default function Explorer() {
   // follow-up job id -> the report id its output should fold back into.
   const followUpTargetRef = useRef<Record<string, string>>({});
   const followUpRef = useRef<HTMLTextAreaElement | null>(null);
+  const steeringRef = useRef<HTMLTextAreaElement | null>(null);
 
   const loadReports = useCallback(async () => {
     try {
@@ -193,6 +194,14 @@ export default function Explorer() {
     el.style.height = "auto";
     el.style.height = `${el.scrollHeight}px`;
   }, [followUpText, selectedId]);
+
+  // Grow the steering textarea to fit its content too.
+  useEffect(() => {
+    const el = steeringRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  }, [steering]);
 
   const startAnalysis = useCallback(
     async (urls: string[], steeringText?: string, force = false) => {
@@ -527,12 +536,11 @@ export default function Explorer() {
             </button>
           </div>
           <textarea
+            ref={steeringRef}
             value={steering}
             onChange={(e) => setSteering(e.target.value)}
-            rows={2}
-            maxLength={500}
             placeholder="Optional focus for this analysis — e.g. “focus on security”, “just the auth module”, “is it worth porting to Next?”"
-            className="w-full resize-y rounded-md border border-border bg-bg px-3 py-2 text-sm text-text outline-none placeholder:text-muted focus:border-accent"
+            className="min-h-20 w-full resize-none overflow-hidden rounded-md border border-border bg-bg px-3 py-2 text-sm text-text outline-none placeholder:text-muted focus:border-accent"
           />
         </form>
         {formError && (
