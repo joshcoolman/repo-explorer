@@ -17,6 +17,7 @@ export interface FollowUpOptions {
   reportPath: string; // absolute path of the existing report to append to
   repos: string[]; // original sources (for re-cloning if the request needs files)
   request: string; // the user's follow-up request
+  anchorId: string; // id to put on the new section's heading, for deep-linking
   resume?: string; // prior session id to resume, when available
   appRoot: string; // cwd; the dir whose .claude/skills/ holds the vendored skill
   onEvent: (e: ProgressEvent) => void;
@@ -49,14 +50,19 @@ function buildPrompt(urls: string[], outFile: string, steeringText?: string): st
     .join(" ");
 }
 
-function buildFollowUpPrompt(reportPath: string, repos: string[], request: string): string {
+function buildFollowUpPrompt(
+  reportPath: string,
+  repos: string[],
+  request: string,
+  anchorId: string,
+): string {
   const subject = repos.length === 2 ? `${repos[0]} and ${repos[1]}` : repos[0];
   return [
     `This is a follow-up to an architectural review you produced for ${subject}.`,
     `The existing HTML report is saved at this exact absolute path: ${reportPath}.`,
-    `Read that file first so you match its existing house style — the same CSS classes, dark theme, voice, and citation format already in the document.`,
+    `Read that file first so you match its existing house style — the same CSS classes, dark theme, voice, citation format, and the h2-with-id heading convention already in the document.`,
     `The user's follow-up request: ${request}`,
-    `Append a single new <section> to that report, inserted immediately before the closing </body> tag, with a heading that names the follow-up (for example "Follow-up: ${request}").`,
+    `Append a new section answering it, inserted immediately before the closing </body> tag. Lead the section with a heading of exactly this form: <h2 id="${anchorId}">Follow-up: <short title></h2> — the id MUST be exactly "${anchorId}" so the app can link to it.`,
     `Do not rewrite, reorder, or remove any existing sections — only add the new one. Keep the file a single self-contained HTML document with no external assets.`,
     `Use what you already know from this session first. Only if the request requires reading repository files you don't already have, shallow-clone the source(s) to a temporary directory and discard the clone when finished; do not ask whether to keep it.`,
     `Do not run any keep-clone prompt. When done, the updated file at ${reportPath} is the only output.`,
@@ -235,7 +241,7 @@ export async function runAnalysis(opts: AnalyzeOptions): Promise<AnalyzeResult> 
 
 export async function runFollowUp(opts: FollowUpOptions): Promise<AnalyzeResult> {
   return streamQuery({
-    prompt: buildFollowUpPrompt(opts.reportPath, opts.repos, opts.request),
+    prompt: buildFollowUpPrompt(opts.reportPath, opts.repos, opts.request, opts.anchorId),
     appRoot: opts.appRoot,
     resume: opts.resume,
     startLabel: "Starting follow-up…",

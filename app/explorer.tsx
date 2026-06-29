@@ -44,6 +44,8 @@ export default function Explorer() {
   const [followUpText, setFollowUpText] = useState("");
   const [submittingFollowUp, setSubmittingFollowUp] = useState(false);
   const [refreshNonce, setRefreshNonce] = useState(0);
+  // When set, the report iframe deep-links to this section anchor.
+  const [pendingAnchor, setPendingAnchor] = useState<string | null>(null);
 
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const [activeStatus, setActiveStatus] = useState<ActiveStatus>(null);
@@ -239,6 +241,7 @@ export default function Explorer() {
   const onSelect = useCallback(
     (r: ReportMeta) => {
       setView("reports");
+      setPendingAnchor(null);
       setSelectedId(r.id);
       if (r.status === "running" && r.id !== activeJobRef.current) {
         openJob(r.id);
@@ -246,6 +249,14 @@ export default function Explorer() {
     },
     [openJob],
   );
+
+  // Open a report scrolled to a specific follow-up section.
+  const jumpToFollowUp = useCallback((reportId: string, anchor: string) => {
+    setView("reports");
+    setSelectedId(reportId);
+    setPendingAnchor(anchor);
+    setRefreshNonce((n) => n + 1); // force the iframe to remount and scroll
+  }, []);
 
   const submitFollowUp = useCallback(
     async (reportId: string) => {
@@ -269,6 +280,7 @@ export default function Explorer() {
         // using the same machinery as a normal analysis.
         followUpTargetRef.current[meta.id] = reportId;
         setFollowUpText("");
+        setPendingAnchor(null);
         setSelectedId(meta.id);
         openJob(meta.id);
       } catch {
@@ -394,6 +406,26 @@ export default function Explorer() {
                         {meta.length > 0 && <span>· {meta.join(" · ")}</span>}
                       </div>
                     </button>
+                    {selected && r.followUps && r.followUps.length > 0 && (
+                      <div className="border-t border-border px-4 pb-2 pt-1">
+                        <div className="py-1 text-[10px] font-medium uppercase tracking-wide text-muted">
+                          Follow-ups
+                        </div>
+                        <ul className="space-y-0.5">
+                          {r.followUps.map((f, i) => (
+                            <li key={i}>
+                              <button
+                                onClick={() => jumpToFollowUp(r.id, f.anchor)}
+                                title={f.request}
+                                className="block w-full truncate rounded px-2 py-1 text-left text-xs text-muted hover:bg-panel-2 hover:text-text"
+                              >
+                                {f.request}
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
                   </li>
                 );
               })}
@@ -500,8 +532,8 @@ export default function Explorer() {
                 </div>
               )}
               <iframe
-                key={`${selectedId}:${refreshNonce}`}
-                src={`/api/reports/${selectedId}`}
+                key={`${selectedId}:${refreshNonce}:${pendingAnchor ?? ""}`}
+                src={`/api/reports/${selectedId}${pendingAnchor ? `#${pendingAnchor}` : ""}`}
                 title="Report"
                 sandbox="allow-popups allow-popups-to-escape-sandbox"
                 className="w-full flex-1 border-0 bg-white"

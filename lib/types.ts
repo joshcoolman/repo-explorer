@@ -2,6 +2,13 @@ export type ReportMode = "single" | "compare";
 
 export type ReportStatus = "running" | "done" | "error";
 
+/** A follow-up appended to a report, for the per-report "Follow-ups" sub-nav. */
+export interface FollowUp {
+  request: string; // what the user asked for
+  anchor: string; // id of the appended section's heading, for deep-linking
+  createdAt: string; // ISO timestamp
+}
+
 export interface ReportMeta {
   id: string;
   title: string;
@@ -14,6 +21,7 @@ export interface ReportMeta {
   durationMs?: number; // wall-clock time the analysis actually ran
   steeringText?: string; // optional user focus/intent for this run
   sessionId?: string; // Agent SDK session id, so follow-ups can resume the conversation
+  followUps?: FollowUp[]; // appended follow-ups, newest last
 }
 
 /** A repo from github.com/trending (ephemeral, not persisted). */

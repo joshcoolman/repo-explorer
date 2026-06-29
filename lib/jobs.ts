@@ -191,11 +191,13 @@ async function runFollowUpJob(job: Job): Promise<void> {
     job.emitter.emit("event", e);
   };
   const { targetReportId, request, original } = job.followUp!;
+  const anchorId = `followup-${(original.followUps?.length ?? 0) + 1}`;
 
   const result = await runFollowUp({
     reportPath: reportHtmlPath(targetReportId),
     repos: original.repos,
     request,
+    anchorId,
     resume: original.sessionId,
     appRoot: process.cwd(),
     onEvent: emit,
@@ -220,6 +222,14 @@ async function runFollowUpJob(job: Job): Promise<void> {
     ...latest,
     costUsd: (latest.costUsd ?? 0) + (result.costUsd ?? 0),
     sessionId: result.sessionId ?? latest.sessionId,
+    ...(result.ok
+      ? {
+          followUps: [
+            ...(latest.followUps ?? []),
+            { request, anchor: anchorId, createdAt: new Date().toISOString() },
+          ],
+        }
+      : {}),
   });
 
   job.meta = {
