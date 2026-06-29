@@ -40,8 +40,9 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# repo-explorer generated data
-/data/reports/*.html
+# repo-explorer generated data (reports are now folders: data/reports/<slug>/)
+/data/reports/*
+!/data/reports/.gitkeep
 /data/index.json
 
 # keep the env template tracked
