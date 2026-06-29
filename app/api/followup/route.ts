@@ -17,8 +17,8 @@ export async function POST(req: NextRequest) {
   }
 
   const rawRequest = (body as { request?: unknown })?.request;
-  const request =
-    typeof rawRequest === "string" ? rawRequest.trim().slice(0, 500) : "";
+  // No length cap on follow-ups — long, detailed requests are encouraged.
+  const request = typeof rawRequest === "string" ? rawRequest.trim() : "";
   if (!request) {
     return NextResponse.json({ error: "Provide a follow-up request" }, { status: 400 });
   }

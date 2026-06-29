@@ -66,6 +66,7 @@ export default function Explorer() {
   const attachedRef = useRef(false);
   // follow-up job id -> the report id its output should fold back into.
   const followUpTargetRef = useRef<Record<string, string>>({});
+  const followUpRef = useRef<HTMLTextAreaElement | null>(null);
 
   const loadReports = useCallback(async () => {
     try {
@@ -176,6 +177,14 @@ export default function Explorer() {
   useEffect(() => {
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
   }, [progress]);
+
+  // Grow the follow-up textarea to fit its content — no inner scrollbar.
+  useEffect(() => {
+    const el = followUpRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  }, [followUpText, selectedId]);
 
   const startAnalysis = useCallback(
     async (urls: string[], steeringText?: string) => {
@@ -500,12 +509,11 @@ export default function Explorer() {
               {selectedReport?.status === "done" && (
                 <div className="flex items-end gap-2 border-t border-border bg-panel px-4 py-3">
                   <textarea
+                    ref={followUpRef}
                     value={followUpText}
                     onChange={(e) => setFollowUpText(e.target.value)}
-                    rows={2}
-                    maxLength={500}
                     placeholder="Ask a follow-up and append it to this report — e.g. “dig deeper into their auth and add a section”"
-                    className="min-w-0 flex-1 resize-y rounded-md border border-border bg-bg px-3 py-2 text-sm text-text outline-none placeholder:text-muted focus:border-accent"
+                    className="min-h-20 min-w-0 flex-1 resize-none overflow-hidden rounded-md border border-border bg-bg px-3 py-2 text-sm text-text outline-none placeholder:text-muted focus:border-accent"
                     onKeyDown={(e) => {
                       if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
                         e.preventDefault();
