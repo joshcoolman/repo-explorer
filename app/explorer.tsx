@@ -53,6 +53,11 @@ export default function Explorer() {
   } | null>(null);
 
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
+  // When the active job is a follow-up, the report id its output folds into.
+  // Mirrors followUpTargetRef for render (refs can't be read during render).
+  const [activeFollowUpTarget, setActiveFollowUpTarget] = useState<string | null>(
+    null,
+  );
   const [activeStatus, setActiveStatus] = useState<ActiveStatus>(null);
   const [progress, setProgress] = useState<ProgressEvent[]>([]);
   const [jobStartedAt, setJobStartedAt] = useState<number | null>(null);
@@ -136,9 +141,10 @@ export default function Explorer() {
   );
 
   const openJob = useCallback(
-    (id: string) => {
+    (id: string, followUpTarget: string | null = null) => {
       activeJobRef.current = id;
       setActiveJobId(id);
+      setActiveFollowUpTarget(followUpTarget);
       setActiveStatus("running");
       setProgress([]);
       setJobStartedAt(Date.now());
@@ -330,7 +336,7 @@ export default function Explorer() {
         setFollowUpText("");
         setSelectedDoc(null);
         setSelectedId(meta.id);
-        openJob(meta.id);
+        openJob(meta.id, reportId);
       } catch {
         setFormError("Network error starting follow-up.");
       } finally {
@@ -373,12 +379,26 @@ export default function Explorer() {
     [loadTrending],
   );
 
+  const selectedReport = reports.find((r) => r.id === selectedId) ?? null;
+
+  // A job we kicked off is in flight (locks "New analysis" + Go).
+  const running = activeStatus === "running" || liveLost;
+
+  // Live panel while streaming, or for a follow-up error with no report of its own.
+  // (A main-analysis error has a report and falls through to the report view.)
   const showingLiveJob =
     selectedId !== null &&
     selectedId === activeJobId &&
-    (activeStatus === "running" || activeStatus === "error" || liveLost);
+    (running || (activeStatus === "error" && selectedReport === null));
 
-  const selectedReport = reports.find((r) => r.id === selectedId) ?? null;
+  // Job in flight, for the running header. Follow-ups aren't in `reports`, so fall
+  // back to the report they target (activeFollowUpTarget holds that report id).
+  const runningMeta =
+    reports.find((r) => r.id === activeJobId) ??
+    (activeFollowUpTarget
+      ? (reports.find((r) => r.id === activeFollowUpTarget) ?? null)
+      : null);
+  const runningIsFollowUp = !!activeFollowUpTarget;
 
   // Map canonical repo URL -> its report (prefer a finished one) for trending.
   const reportByUrl = new Map<string, ReportMeta>();
@@ -415,6 +435,19 @@ export default function Explorer() {
               </button>
             ))}
           </div>
+        </div>
+        <div className="px-4 pb-2 pt-3">
+          <button
+            onClick={() => {
+              setView("reports");
+              setSelectedDoc(null);
+              setSelectedId(null);
+            }}
+            disabled={running}
+            className="w-full rounded-md border border-border px-3 py-2 text-sm text-text hover:bg-panel-2 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            + New analysis
+          </button>
         </div>
         <div className="flex-1 overflow-y-auto py-2">
           {reports.length === 0 ? (
@@ -523,206 +556,241 @@ export default function Explorer() {
             onView={(r) => onSelect(r)}
           />
         ) : (
-          <>
-        {/* Form */}
-        <form
-          onSubmit={onSubmit}
-          className="flex flex-col gap-2 border-b border-border bg-panel px-4 py-3"
-        >
-          <div className="flex flex-wrap items-center gap-2">
-            <input
-              value={urlA}
-              onChange={(e) => setUrlA(e.target.value)}
-              placeholder="github.com/owner/repo  (or owner/repo)"
-              className="min-w-0 flex-1 rounded-md border border-border bg-bg px-3 py-2 text-sm text-text outline-none placeholder:text-muted focus:border-accent"
-            />
-            <span className="text-xs text-muted">compare with</span>
-            <input
-              value={urlB}
-              onChange={(e) => setUrlB(e.target.value)}
-              placeholder="optional second repo"
-              className="min-w-0 flex-1 rounded-md border border-border bg-bg px-3 py-2 text-sm text-text outline-none placeholder:text-muted focus:border-accent"
-            />
-            <button
-              type="submit"
-              disabled={submitting}
-              className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-bg transition-opacity hover:opacity-90 disabled:opacity-50"
-            >
-              {submitting ? "Starting…" : "Go"}
-            </button>
-          </div>
-          <textarea
-            ref={steeringRef}
-            value={steering}
-            onChange={(e) => setSteering(e.target.value)}
-            placeholder="Optional focus for this analysis — e.g. “focus on security”, “just the auth module”, “is it worth porting to Next?”"
-            className="min-h-20 w-full resize-none overflow-hidden rounded-md border border-border bg-bg px-3 py-2 text-sm text-text outline-none placeholder:text-muted focus:border-accent"
-          />
-        </form>
-        {formError && (
-          <div className="border-b border-border bg-bad/10 px-4 py-2 text-sm text-bad">
-            {formError}
-          </div>
-        )}
-        {dupe && (
-          <div className="flex flex-wrap items-center gap-2 border-b border-border bg-panel px-4 py-2 text-sm text-text">
-            <span>
-              You’ve already analyzed{" "}
-              <span className="font-medium">{dupe.existing.title}</span>.
-            </span>
-            <button
-              onClick={() => {
-                const ex = dupe.existing;
-                const steer = dupe.steeringText;
-                setDupe(null);
-                setSelectedDoc(null);
-                setSelectedId(ex.id);
-                if (steer) setFollowUpText(steer);
-              }}
-              className="rounded-md border border-border px-2.5 py-1 text-xs hover:bg-panel-2"
-            >
-              Ask a follow-up
-            </button>
-            <button
-              onClick={() => {
-                const ex = dupe.existing;
-                const steer = dupe.steeringText;
-                setDupe(null);
-                void (async () => {
-                  try {
-                    await fetch(`/api/reports/${ex.id}`, { method: "DELETE" });
-                  } catch {
-                    /* best effort */
-                  }
-                  setReports((prev) => prev.filter((x) => x.id !== ex.id));
-                  reportsRef.current = reportsRef.current.filter(
-                    (x) => x.id !== ex.id,
-                  );
-                  await startAnalysis(ex.repos, steer, true);
-                })();
-              }}
-              className="rounded-md border border-bad/40 px-2.5 py-1 text-xs text-bad hover:bg-bad/10"
-            >
-              Delete &amp; start over
-            </button>
-            <button
-              onClick={() => setDupe(null)}
-              className="text-xs text-muted hover:text-text"
-            >
-              Cancel
-            </button>
-          </div>
-        )}
-
-        {/* Content */}
-        <div className="min-h-0 flex-1">
-          {showingLiveJob ? (
-            <ProgressPanel
-              status={activeStatus}
-              liveLost={liveLost}
-              events={progress}
-              now={now}
-              jobStartedAt={jobStartedAt}
-              lastEventAt={lastEventAt}
-              logRef={logRef}
-              onReconnect={() => activeJobId && openJob(activeJobId)}
-            />
-          ) : selectedId ? (
-            <div className="flex h-full flex-col">
-              {selectedReport && selectedReport.repos.length > 0 && (
-                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-border bg-panel px-4 py-2 text-xs text-muted">
-                  <span>Source:</span>
-                  {selectedReport.repos.map((u, i) => {
-                    const ref = toRepoRef(u);
-                    return (
-                      <a
-                        key={i}
-                        href={ref.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-accent hover:underline"
-                      >
-                        {ref.label}
-                      </a>
-                    );
-                  })}
-                  {selectedReport.status === "error" && (
-                    <button
-                      onClick={() => void rerunReport(selectedReport)}
-                      className="rounded-md border border-border px-2 py-0.5 text-[11px] text-text hover:bg-panel-2"
-                    >
-                      Retry analysis
-                    </button>
-                  )}
-                  {selectedReport.steeringText && (
-                    <span className="flex basis-full items-start gap-2 text-muted">
-                      <span>Focus: {selectedReport.steeringText}</span>
-                      <button
-                        onClick={() =>
-                          navigator.clipboard?.writeText(
-                            selectedReport.steeringText ?? "",
-                          )
-                        }
-                        title="Copy focus text"
-                        className="shrink-0 rounded border border-border px-1.5 py-0.5 text-[10px] text-muted hover:bg-panel-2 hover:text-text"
-                      >
-                        Copy
-                      </button>
-                    </span>
-                  )}
-                  {selectedReport.status === "error" &&
-                    /usage limit|401|unauthoriz|authenticat|credit|billing/i.test(
-                      selectedReport.error ?? "",
-                    ) && (
+          <div className="flex min-h-0 flex-1 flex-col">
+            {showingLiveJob ? (
+              /* RUNNING */
+              <div className="flex h-full flex-col">
+                {runningMeta && (
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-border bg-panel px-4 py-2 text-xs text-muted">
+                    <span>{runningIsFollowUp ? "Following up on" : "Analyzing"}</span>
+                    {runningMeta.repos.map((u, i) => {
+                      const ref = toRepoRef(u);
+                      return (
+                        <a
+                          key={i}
+                          href={ref.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-accent hover:underline"
+                        >
+                          {ref.label}
+                        </a>
+                      );
+                    })}
+                    {!runningIsFollowUp && runningMeta.steeringText && (
                       <span className="basis-full text-muted">
-                        Looks like an auth/usage issue — run{" "}
-                        <span className="text-accent">pnpm launch</span> to switch between
-                        your Claude subscription and an API key, then restart the dev
-                        server.
+                        Focus: {runningMeta.steeringText}
                       </span>
                     )}
-                </div>
-              )}
-              <iframe
-                key={`${selectedId}:${selectedDoc ?? "index"}:${refreshNonce}`}
-                src={`/api/reports/${selectedId}${selectedDoc ? `/${selectedDoc}` : ""}`}
-                title="Report"
-                sandbox="allow-popups allow-popups-to-escape-sandbox"
-                className="w-full flex-1 border-0 bg-white"
-              />
-              {selectedReport?.status === "done" && (
-                <div className="flex items-end gap-2 border-t border-border bg-panel px-4 py-3">
-                  <textarea
-                    ref={followUpRef}
-                    value={followUpText}
-                    onChange={(e) => setFollowUpText(e.target.value)}
-                    placeholder="Ask a follow-up — added as a new document to this report — e.g. “dig deeper into their auth”"
-                    className="min-h-20 min-w-0 flex-1 resize-none overflow-hidden rounded-md border border-border bg-bg px-3 py-2 text-sm text-text outline-none placeholder:text-muted focus:border-accent"
-                    onKeyDown={(e) => {
-                      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-                        e.preventDefault();
-                        void submitFollowUp(selectedId);
-                      }
-                    }}
+                  </div>
+                )}
+                <div className="min-h-0 flex-1">
+                  <ProgressPanel
+                    status={activeStatus}
+                    liveLost={liveLost}
+                    events={progress}
+                    now={now}
+                    jobStartedAt={jobStartedAt}
+                    lastEventAt={lastEventAt}
+                    logRef={logRef}
+                    onReconnect={() => activeJobId && openJob(activeJobId)}
                   />
-                  <button
-                    onClick={() => void submitFollowUp(selectedId)}
-                    disabled={!followUpText.trim() || submittingFollowUp}
-                    className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-bg transition-opacity hover:opacity-90 disabled:opacity-50"
-                  >
-                    {submittingFollowUp ? "Starting…" : "Ask"}
-                  </button>
                 </div>
-              )}
-            </div>
-          ) : (
-            <div className="flex h-full items-center justify-center px-6 text-center text-sm text-muted">
-              Paste a repository URL above and hit Go, or pick a past report from
-              the sidebar. You can start another while one is running.
-            </div>
-          )}
-        </div>
-          </>
+              </div>
+            ) : selectedReport ? (
+              /* REPORT (done / error) */
+              <div className="flex h-full flex-col">
+                {selectedReport.repos.length > 0 && (
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-border bg-panel px-4 py-2 text-xs text-muted">
+                    <span>Source:</span>
+                    {selectedReport.repos.map((u, i) => {
+                      const ref = toRepoRef(u);
+                      return (
+                        <a
+                          key={i}
+                          href={ref.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-accent hover:underline"
+                        >
+                          {ref.label}
+                        </a>
+                      );
+                    })}
+                    <button
+                      onClick={() => void deleteReportById(selectedReport)}
+                      className="rounded-md border border-bad/40 px-2 py-0.5 text-[11px] text-bad hover:bg-bad/10"
+                    >
+                      Delete
+                    </button>
+                    {selectedReport.status === "error" && (
+                      <button
+                        onClick={() => void rerunReport(selectedReport)}
+                        className="rounded-md border border-border px-2 py-0.5 text-[11px] text-text hover:bg-panel-2"
+                      >
+                        Retry analysis
+                      </button>
+                    )}
+                    {selectedReport.steeringText && (
+                      <span className="flex basis-full items-start gap-2 text-muted">
+                        <span>Focus: {selectedReport.steeringText}</span>
+                        <button
+                          onClick={() =>
+                            navigator.clipboard?.writeText(
+                              selectedReport.steeringText ?? "",
+                            )
+                          }
+                          title="Copy focus text"
+                          className="shrink-0 rounded border border-border px-1.5 py-0.5 text-[10px] text-muted hover:bg-panel-2 hover:text-text"
+                        >
+                          Copy
+                        </button>
+                      </span>
+                    )}
+                    {selectedReport.status === "error" &&
+                      /usage limit|401|unauthoriz|authenticat|credit|billing/i.test(
+                        selectedReport.error ?? "",
+                      ) && (
+                        <span className="basis-full text-muted">
+                          Looks like an auth/usage issue — run{" "}
+                          <span className="text-accent">pnpm launch</span> to switch
+                          between your Claude subscription and an API key, then restart
+                          the dev server.
+                        </span>
+                      )}
+                  </div>
+                )}
+                <iframe
+                  key={`${selectedReport.id}:${selectedDoc ?? "index"}:${refreshNonce}`}
+                  src={`/api/reports/${selectedReport.id}${selectedDoc ? `/${selectedDoc}` : ""}`}
+                  title="Report"
+                  sandbox="allow-popups allow-popups-to-escape-sandbox"
+                  className="w-full flex-1 border-0 bg-white"
+                />
+                {selectedReport.status === "done" && (
+                  <div className="flex items-end gap-2 border-t border-border bg-panel px-4 py-3">
+                    <textarea
+                      ref={followUpRef}
+                      value={followUpText}
+                      onChange={(e) => setFollowUpText(e.target.value)}
+                      placeholder="Ask a follow-up — added as a new document to this report — e.g. “dig deeper into their auth”"
+                      className="min-h-20 min-w-0 flex-1 resize-none overflow-hidden rounded-md border border-border bg-bg px-3 py-2 text-sm text-text outline-none placeholder:text-muted focus:border-accent"
+                      onKeyDown={(e) => {
+                        if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+                          e.preventDefault();
+                          void submitFollowUp(selectedReport.id);
+                        }
+                      }}
+                    />
+                    <button
+                      onClick={() => void submitFollowUp(selectedReport.id)}
+                      disabled={!followUpText.trim() || submittingFollowUp}
+                      className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-bg transition-opacity hover:opacity-90 disabled:opacity-50"
+                    >
+                      {submittingFollowUp ? "Starting…" : "Ask"}
+                    </button>
+                  </div>
+                )}
+              </div>
+            ) : (
+              /* START — the editable form + banners */
+              <div className="flex h-full flex-col">
+                <form
+                  onSubmit={onSubmit}
+                  className="flex flex-col gap-2 border-b border-border bg-panel px-4 py-3"
+                >
+                  <div className="flex flex-wrap items-center gap-2">
+                    <input
+                      value={urlA}
+                      onChange={(e) => setUrlA(e.target.value)}
+                      placeholder="github.com/owner/repo  (or owner/repo)"
+                      className="min-w-0 flex-1 rounded-md border border-border bg-bg px-3 py-2 text-sm text-text outline-none placeholder:text-muted focus:border-accent"
+                    />
+                    <span className="text-xs text-muted">compare with</span>
+                    <input
+                      value={urlB}
+                      onChange={(e) => setUrlB(e.target.value)}
+                      placeholder="optional second repo"
+                      className="min-w-0 flex-1 rounded-md border border-border bg-bg px-3 py-2 text-sm text-text outline-none placeholder:text-muted focus:border-accent"
+                    />
+                    <button
+                      type="submit"
+                      disabled={submitting || running}
+                      className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-bg transition-opacity hover:opacity-90 disabled:opacity-50"
+                    >
+                      {submitting ? "Starting…" : "Go"}
+                    </button>
+                  </div>
+                  <textarea
+                    ref={steeringRef}
+                    value={steering}
+                    onChange={(e) => setSteering(e.target.value)}
+                    placeholder="Optional focus for this analysis — e.g. “focus on security”, “just the auth module”, “is it worth porting to Next?”"
+                    className="min-h-20 w-full resize-none overflow-hidden rounded-md border border-border bg-bg px-3 py-2 text-sm text-text outline-none placeholder:text-muted focus:border-accent"
+                  />
+                </form>
+                {formError && (
+                  <div className="border-b border-border bg-bad/10 px-4 py-2 text-sm text-bad">
+                    {formError}
+                  </div>
+                )}
+                {dupe && (
+                  <div className="flex flex-wrap items-center gap-2 border-b border-border bg-panel px-4 py-2 text-sm text-text">
+                    <span>
+                      You’ve already analyzed{" "}
+                      <span className="font-medium">{dupe.existing.title}</span>.
+                    </span>
+                    <button
+                      onClick={() => {
+                        const ex = dupe.existing;
+                        const steer = dupe.steeringText;
+                        setDupe(null);
+                        setSelectedDoc(null);
+                        setSelectedId(ex.id);
+                        if (steer) setFollowUpText(steer);
+                      }}
+                      className="rounded-md border border-border px-2.5 py-1 text-xs hover:bg-panel-2"
+                    >
+                      Ask a follow-up
+                    </button>
+                    <button
+                      onClick={() => {
+                        const ex = dupe.existing;
+                        const steer = dupe.steeringText;
+                        setDupe(null);
+                        void (async () => {
+                          try {
+                            await fetch(`/api/reports/${ex.id}`, {
+                              method: "DELETE",
+                            });
+                          } catch {
+                            /* best effort */
+                          }
+                          setReports((prev) => prev.filter((x) => x.id !== ex.id));
+                          reportsRef.current = reportsRef.current.filter(
+                            (x) => x.id !== ex.id,
+                          );
+                          await startAnalysis(ex.repos, steer, true);
+                        })();
+                      }}
+                      className="rounded-md border border-bad/40 px-2.5 py-1 text-xs text-bad hover:bg-bad/10"
+                    >
+                      Delete &amp; start over
+                    </button>
+                    <button
+                      onClick={() => setDupe(null)}
+                      className="text-xs text-muted hover:text-text"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                )}
+                <div className="flex flex-1 items-center justify-center px-6 text-center text-sm text-muted">
+                  Paste a repository URL above and hit Go to analyze a repo.
+                </div>
+              </div>
+            )}
+          </div>
         )}
       </main>
     </div>
