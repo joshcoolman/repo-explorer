@@ -49,6 +49,10 @@ Everything runs **in one Node process**; there is no external queue or DB. Key p
 
 - **[app/explorer.tsx](app/explorer.tsx)** — the client UI; consumes the SSE stream.
 
+## Session orientation
+
+At the start of a session, read `## Status` at the bottom of `README.md` and check [open GitHub issues](https://github.com/joshcoolman/repo-explorer/issues) to understand what was last shipped and what's outstanding.
+
 ## Important conventions
 
 - **The job registry is process-local and ephemeral.** A server restart loses in-flight jobs (acceptable for a local app) but not completed reports. Don't assume jobs survive restarts.

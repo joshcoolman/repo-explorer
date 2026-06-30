@@ -112,3 +112,12 @@ job runner ─► Agent SDK query() ─► loads .claude/skills/explore-repo ─
 - Reports and the index live under `data/` and are gitignored.
 - If the process restarts mid-job, that job is lost (acceptable for a local app);
   completed reports persist on disk.
+
+## Status
+
+**Last shipped:**
+- Triage modal on Trending tab — clicking Analyze shows a GitHub API preview (stars, language, README excerpt, activity verdict) before committing tokens. Analysis starts silently in the background; user stays on Trending. "Not interested" dismisses to a collapsible section, persisted in localStorage.
+- Stop button — cancel a running analysis mid-stream via AbortController.
+- Model selector — choose Opus / Sonnet / Haiku per analysis from the form.
+
+**Up next:** see [open issues](https://github.com/joshcoolman/repo-explorer/issues)
