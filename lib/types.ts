@@ -20,6 +20,7 @@ export interface ReportMeta {
   costUsd?: number;
   durationMs?: number; // wall-clock time the analysis actually ran
   steeringText?: string; // optional user focus/intent for this run
+  model?: string; // claude model id used for this run
   sessionId?: string; // Agent SDK session id, so follow-ups can resume the conversation
   followUps?: FollowUp[]; // follow-up docs in this report's folder, oldest first
 }
@@ -33,6 +34,20 @@ export interface TrendingRepo {
   language: string | null;
   stars: number | null;
   starsToday: number | null; // stars for the selected period
+}
+
+export interface TriageResult {
+  stars: number | null;
+  language: string | null;
+  description: string | null;
+  lastPush: string | null;
+  license: string | null;
+  topics: string[];
+  forks: number | null;
+  rootFiles: string[];
+  readmeExcerpt: string | null;
+  verdict: "promising" | "informational" | "low-activity" | "unknown";
+  verdictNote: string;
 }
 
 /** Progress events streamed from a running analysis job to the browser. */

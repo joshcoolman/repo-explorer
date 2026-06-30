@@ -1,8 +1,18 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { ProgressEvent, ReportMeta, TrendingRepo } from "@/lib/types";
-import { fmtCost, fmtDuration } from "@/lib/format";
+import type { ProgressEvent, ReportMeta, TrendingRepo, TriageResult } from "@/lib/types";
+import { fmtCost, fmtDuration, relativeTime } from "@/lib/format";
+
+const MODELS = [
+  { id: "claude-opus-4-8", label: "Opus 4.8" },
+  { id: "claude-sonnet-4-6", label: "Sonnet 4.6" },
+  { id: "claude-haiku-4-5-20251001", label: "Haiku 4.5" },
+] as const;
+
+function modelLabel(model: string | undefined): string {
+  return MODELS.find((m) => m.id === model)?.label ?? "Opus 4.8";
+}
 import { toRepoRef } from "@/lib/sources";
 
 type ActiveStatus = "running" | "done" | "error" | null;
@@ -38,6 +48,7 @@ export default function Explorer() {
   const [urlA, setUrlA] = useState("");
   const [urlB, setUrlB] = useState("");
   const [steering, setSteering] = useState("");
+  const [model, setModel] = useState<string>(MODELS[0].id);
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
@@ -210,9 +221,9 @@ export default function Explorer() {
   }, [steering]);
 
   const startAnalysis = useCallback(
-    async (urls: string[], steeringText?: string, force = false) => {
+    async (urls: string[], steeringText?: string, force = false, silent = false) => {
       setFormError(null);
-      setView("reports");
+      if (!silent) setView("reports");
       if (urls.length === 0) {
         setFormError("Enter at least one repository URL.");
         return;
@@ -222,7 +233,7 @@ export default function Explorer() {
         const res = await fetch("/api/jobs", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ urls, steeringText, force }),
+          body: JSON.stringify({ urls, steeringText, model, force }),
         });
         const data = await res.json();
         if (!res.ok) {
@@ -298,6 +309,15 @@ export default function Explorer() {
 
   // Re-run a report with its saved repos + steering (e.g. after a failure) —
   // nothing is lost because both are persisted on the report the moment Go is hit.
+  const stopJob = useCallback(async () => {
+    if (!activeJobId) return;
+    try {
+      await fetch(`/api/jobs/${activeJobId}`, { method: "DELETE" });
+    } catch {
+      /* best effort — the SSE stream will surface the cancelled state */
+    }
+  }, [activeJobId]);
+
   const rerunReport = useCallback(
     async (r: ReportMeta) => {
       try {
@@ -459,6 +479,7 @@ export default function Explorer() {
               {reports.map((r) => {
                 const selected = r.id === selectedId;
                 const meta = [
+                  modelLabel(r.model),
                   fmtDuration(r.durationMs),
                   fmtCost(r.costUsd),
                 ].filter(Boolean);
@@ -552,7 +573,7 @@ export default function Explorer() {
             reportByUrl={reportByUrl}
             onSince={onSince}
             onRefresh={() => loadTrending(since)}
-            onAnalyze={(url) => startAnalysis([url])}
+            onAnalyze={(url) => startAnalysis([url], undefined, false, true)}
             onView={(r) => onSelect(r)}
           />
         ) : (
@@ -561,26 +582,36 @@ export default function Explorer() {
               /* RUNNING */
               <div className="flex h-full flex-col">
                 {runningMeta && (
-                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-border bg-panel px-4 py-2 text-xs text-muted">
-                    <span>{runningIsFollowUp ? "Following up on" : "Analyzing"}</span>
-                    {runningMeta.repos.map((u, i) => {
-                      const ref = toRepoRef(u);
-                      return (
-                        <a
-                          key={i}
-                          href={ref.url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-accent hover:underline"
-                        >
-                          {ref.label}
-                        </a>
-                      );
-                    })}
-                    {!runningIsFollowUp && runningMeta.steeringText && (
-                      <span className="basis-full text-muted">
-                        Focus: {runningMeta.steeringText}
-                      </span>
+                  <div className="flex items-start gap-3 border-b border-border bg-panel px-4 py-2 text-xs text-muted">
+                    <div className="flex flex-1 flex-wrap items-center gap-x-3 gap-y-1">
+                      <span>{runningIsFollowUp ? "Following up on" : "Analyzing"}</span>
+                      {runningMeta.repos.map((u, i) => {
+                        const ref = toRepoRef(u);
+                        return (
+                          <a
+                            key={i}
+                            href={ref.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-accent hover:underline"
+                          >
+                            {ref.label}
+                          </a>
+                        );
+                      })}
+                      {!runningIsFollowUp && runningMeta.steeringText && (
+                        <span className="basis-full text-muted">
+                          Focus: {runningMeta.steeringText}
+                        </span>
+                      )}
+                    </div>
+                    {activeStatus === "running" && (
+                      <button
+                        onClick={() => void stopJob()}
+                        className="shrink-0 rounded-md border border-bad/40 px-2.5 py-1 text-[11px] text-bad hover:bg-bad/10"
+                      >
+                        Stop
+                      </button>
                     )}
                   </div>
                 )}
@@ -713,6 +744,15 @@ export default function Explorer() {
                       placeholder="optional second repo"
                       className="min-w-0 flex-1 rounded-md border border-border bg-bg px-3 py-2 text-sm text-text outline-none placeholder:text-muted focus:border-accent"
                     />
+                    <select
+                      value={model}
+                      onChange={(e) => setModel(e.target.value)}
+                      className="rounded-md border border-border bg-bg px-2 py-2 text-sm text-text outline-none focus:border-accent"
+                    >
+                      {MODELS.map((m) => (
+                        <option key={m.id} value={m.id}>{m.label}</option>
+                      ))}
+                    </select>
                     <button
                       type="submit"
                       disabled={submitting || running}
@@ -938,6 +978,33 @@ function TrendingView({
   onAnalyze: (url: string) => void;
   onView: (r: ReportMeta) => void;
 }) {
+  const [dismissed, setDismissed] = useState<Set<string>>(() => {
+    try {
+      const raw =
+        typeof window !== "undefined" &&
+        localStorage.getItem("repo-explorer:dismissed");
+      return new Set(raw ? (JSON.parse(raw) as string[]) : []);
+    } catch {
+      return new Set();
+    }
+  });
+  const [dismissedExpanded, setDismissedExpanded] = useState(false);
+  const [triageTarget, setTriageTarget] = useState<TrendingRepo | null>(null);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        "repo-explorer:dismissed",
+        JSON.stringify([...dismissed]),
+      );
+    } catch {
+      /* storage quota */
+    }
+  }, [dismissed]);
+
+  const activeRepos = repos.filter((r) => !dismissed.has(r.url));
+  const dismissedRepos = repos.filter((r) => dismissed.has(r.url));
+
   return (
     <div className="flex h-full flex-col">
       <div className="flex flex-wrap items-center gap-2 border-b border-border bg-panel px-4 py-3">
@@ -971,71 +1038,307 @@ function TrendingView({
         ) : repos.length === 0 ? (
           <p className="px-2 py-6 text-sm text-muted">No trending repos found.</p>
         ) : (
-          <ul className="mx-auto flex max-w-3xl flex-col gap-3">
-            {repos.map((repo) => {
-              const report = reportByUrl.get(repo.url);
-              return (
-                <li
-                  key={repo.url}
-                  className="rounded-lg border border-border bg-panel p-4"
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <a
-                        href={repo.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-sm font-medium text-accent hover:underline"
-                      >
-                        {repo.owner}/{repo.repo}
-                      </a>
-                      {repo.description && (
-                        <p className="mt-1 text-sm text-muted">
-                          {repo.description}
-                        </p>
-                      )}
-                      <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted">
-                        {repo.language && <span>{repo.language}</span>}
-                        {repo.stars != null && (
-                          <span>★ {repo.stars.toLocaleString()}</span>
+          <div className="mx-auto max-w-3xl">
+            <ul className="flex flex-col gap-3">
+              {activeRepos.map((repo) => {
+                const report = reportByUrl.get(repo.url);
+                return (
+                  <li
+                    key={repo.url}
+                    className="rounded-lg border border-border bg-panel p-4"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <a
+                          href={repo.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-sm font-medium text-accent hover:underline"
+                        >
+                          {repo.owner}/{repo.repo}
+                        </a>
+                        {repo.description && (
+                          <p className="mt-1 text-sm text-muted">
+                            {repo.description}
+                          </p>
                         )}
-                        {repo.starsToday != null && (
-                          <span className="text-accent-2">
-                            {repo.starsToday.toLocaleString()} stars {since === "daily" ? "today" : since === "weekly" ? "this week" : "this month"}
+                        <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted">
+                          {repo.language && <span>{repo.language}</span>}
+                          {repo.stars != null && (
+                            <span>★ {repo.stars.toLocaleString()}</span>
+                          )}
+                          {repo.starsToday != null && (
+                            <span className="text-accent-2">
+                              {repo.starsToday.toLocaleString()} stars{" "}
+                              {since === "daily"
+                                ? "today"
+                                : since === "weekly"
+                                  ? "this week"
+                                  : "this month"}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="shrink-0">
+                        {report?.status === "done" ? (
+                          <button
+                            onClick={() => onView(report)}
+                            className="rounded-md border border-border px-3 py-1.5 text-xs text-text hover:border-accent"
+                          >
+                            View report
+                          </button>
+                        ) : report?.status === "running" ? (
+                          <span className="text-xs text-accent">
+                            ● Analyzing…
                           </span>
+                        ) : (
+                          <button
+                            onClick={() => setTriageTarget(repo)}
+                            className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-bg hover:opacity-90"
+                          >
+                            Analyze
+                          </button>
                         )}
                       </div>
                     </div>
-                    <div className="shrink-0">
-                      {report?.status === "done" ? (
+                  </li>
+                );
+              })}
+            </ul>
+
+            {dismissedRepos.length > 0 && (
+              <div className="mt-4 border-t border-border px-2 pt-3">
+                <button
+                  onClick={() => setDismissedExpanded((e) => !e)}
+                  className="flex items-center gap-1 text-xs text-muted hover:text-text"
+                >
+                  <span>{dismissedRepos.length} dismissed</span>
+                  <span>{dismissedExpanded ? "▴" : "▾"}</span>
+                </button>
+                {dismissedExpanded && (
+                  <ul className="mt-2 space-y-1">
+                    {dismissedRepos.map((repo) => (
+                      <li
+                        key={repo.url}
+                        className="flex items-center justify-between rounded px-2 py-1.5 text-xs text-muted/60"
+                      >
+                        <span className="truncate">
+                          {repo.owner}/{repo.repo}
+                        </span>
                         <button
-                          onClick={() => onView(report)}
-                          className="rounded-md border border-border px-3 py-1.5 text-xs text-text hover:border-accent"
+                          onClick={() =>
+                            setDismissed((prev) => {
+                              const next = new Set(prev);
+                              next.delete(repo.url);
+                              return next;
+                            })
+                          }
+                          className="ml-3 shrink-0 text-muted hover:text-text"
                         >
-                          View report
+                          Undo
                         </button>
-                      ) : report?.status === "running" ? (
-                        <button
-                          onClick={() => onView(report)}
-                          className="rounded-md border border-border px-3 py-1.5 text-xs text-accent hover:border-accent"
-                        >
-                          View progress
-                        </button>
-                      ) : (
-                        <button
-                          onClick={() => onAnalyze(repo.url)}
-                          className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-bg hover:opacity-90"
-                        >
-                          Analyze
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
+          </div>
         )}
+      </div>
+
+      {triageTarget && (
+        <TriageModal
+          repo={triageTarget}
+          onClose={() => setTriageTarget(null)}
+          onDismiss={() => {
+            setDismissed((prev) => new Set([...prev, triageTarget.url]));
+            setTriageTarget(null);
+          }}
+          onAnalyze={() => {
+            onAnalyze(triageTarget.url);
+            setTriageTarget(null);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function TriageModal({
+  repo,
+  onClose,
+  onDismiss,
+  onAnalyze,
+}: {
+  repo: TrendingRepo;
+  onClose: () => void;
+  onDismiss: () => void;
+  onAnalyze: () => void;
+}) {
+  const [triage, setTriage] = useState<TriageResult | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    setTriage(null);
+    fetch("/api/triage", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url: repo.url }),
+    })
+      .then((r) => r.json())
+      .then((data) => {
+        if (cancelled) return;
+        if (data.error) setError(data.error);
+        else setTriage(data as TriageResult);
+      })
+      .catch(() => {
+        if (!cancelled)
+          setError("Network error — couldn't reach triage endpoint.");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [repo.url]);
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [onClose]);
+
+  const verdictClass = triage
+    ? ({
+        promising: "bg-good/20 text-good border border-good/40",
+        "low-activity": "bg-bad/20 text-bad border border-bad/40",
+        informational: "bg-accent-2/20 text-accent-2 border border-accent-2/40",
+        unknown: "bg-muted/20 text-muted border border-muted/40",
+      } as Record<string, string>)[triage.verdict]
+    : "";
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+      onClick={onClose}
+    >
+      <div
+        className="relative w-full max-w-lg max-h-[80vh] overflow-y-auto rounded-xl border border-border bg-panel shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* header */}
+        <div className="flex items-start justify-between gap-3 border-b border-border px-5 py-4">
+          <a
+            href={repo.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-sm font-medium text-accent hover:underline"
+          >
+            {repo.owner}/{repo.repo}
+          </a>
+          <button
+            onClick={onClose}
+            aria-label="Close"
+            className="shrink-0 text-lg leading-none text-muted hover:text-text"
+          >
+            ×
+          </button>
+        </div>
+
+        {/* body */}
+        <div className="px-5 py-4">
+          {loading ? (
+            <div className="space-y-3">
+              <div className="h-4 w-3/4 animate-pulse rounded bg-panel-2" />
+              <div className="h-4 w-1/2 animate-pulse rounded bg-panel-2" />
+              <div className="h-4 w-2/3 animate-pulse rounded bg-panel-2" />
+            </div>
+          ) : error ? (
+            <p className="text-sm text-bad">{error}</p>
+          ) : triage ? (
+            <div className="space-y-3">
+              {/* stats row */}
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted">
+                {triage.stars != null && (
+                  <span>★ {triage.stars.toLocaleString()}</span>
+                )}
+                {triage.language && <span>{triage.language}</span>}
+                {triage.forks != null && (
+                  <span>{triage.forks.toLocaleString()} forks</span>
+                )}
+                {triage.lastPush && (
+                  <span>updated {relativeTime(triage.lastPush)}</span>
+                )}
+                {triage.license && <span>{triage.license}</span>}
+              </div>
+
+              {triage.description && (
+                <p className="text-sm text-text">{triage.description}</p>
+              )}
+
+              {triage.topics.length > 0 && (
+                <div className="flex flex-wrap gap-1.5">
+                  {triage.topics.map((t) => (
+                    <span
+                      key={t}
+                      className="rounded-full border border-accent/20 bg-accent/10 px-2 py-0.5 text-xs text-accent"
+                    >
+                      {t}
+                    </span>
+                  ))}
+                </div>
+              )}
+
+              {triage.rootFiles.length > 0 && (
+                <div className="text-xs text-muted">
+                  <span className="font-medium text-text/60">Files: </span>
+                  <span className="font-mono">
+                    {triage.rootFiles.join(", ")}
+                  </span>
+                </div>
+              )}
+
+              {triage.readmeExcerpt && (
+                <pre className="max-h-32 overflow-y-auto whitespace-pre-wrap rounded bg-panel-2 p-3 text-xs text-muted">
+                  {triage.readmeExcerpt}
+                </pre>
+              )}
+
+              <div className="flex items-start gap-2">
+                <span
+                  className={`shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium ${verdictClass}`}
+                >
+                  {triage.verdict}
+                </span>
+                <span className="text-xs text-muted">{triage.verdictNote}</span>
+              </div>
+            </div>
+          ) : null}
+        </div>
+
+        {/* footer */}
+        <div className="flex items-center justify-between border-t border-border px-5 py-3">
+          <button
+            onClick={onDismiss}
+            className="rounded-md border border-bad/40 px-3 py-1.5 text-xs text-bad hover:bg-bad/10"
+          >
+            Not interested
+          </button>
+          <button
+            onClick={onAnalyze}
+            className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-bg hover:opacity-90"
+          >
+            Analyze →
+          </button>
+        </div>
       </div>
     </div>
   );
