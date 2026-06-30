@@ -6,13 +6,13 @@ import type { ProgressEvent, ReportMeta, TrendingRepo, TriageResult } from "@/li
 import { fmtCost, fmtDuration, relativeTime } from "@/lib/format";
 
 const MODELS = [
+  { id: "claude-sonnet-5", label: "Sonnet 5" },
   { id: "claude-opus-4-8", label: "Opus 4.8" },
-  { id: "claude-sonnet-4-6", label: "Sonnet 4.6" },
   { id: "claude-haiku-4-5-20251001", label: "Haiku 4.5" },
 ] as const;
 
 function modelLabel(model: string | undefined): string {
-  return MODELS.find((m) => m.id === model)?.label ?? "Opus 4.8";
+  return MODELS.find((m) => m.id === model)?.label ?? "Sonnet 5";
 }
 import { toRepoRef } from "@/lib/sources";
 import { useBookmarks, type BookmarksApi } from "@/lib/bookmarks";

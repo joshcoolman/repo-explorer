@@ -3,7 +3,7 @@ import type { ProgressEvent } from "./types";
 
 // The default analysis model. Parameterized through streamQuery so a future
 // model-selection feature only needs to thread a value here.
-const DEFAULT_MODEL = "claude-opus-4-8";
+const DEFAULT_MODEL = "claude-sonnet-5";
 
 export interface AnalyzeOptions {
   urls: string[]; // 1 = single review, 2 = comparison
@@ -75,18 +75,81 @@ function truncate(s: string, n = 200): string {
   return oneLine.length > n ? oneLine.slice(0, n) + "…" : oneLine;
 }
 
+// Matches the ephemeral shallow-clone directory boundary — macOS
+// `/var/folders/.../T/tmp.XXXX/<repo>/` or POSIX `/tmp/tmp.XXXX/<repo>/` — so log lines
+// show paths relative to the repo root instead of the full disposable clone path.
+const CLONE_TMP_RE =
+  /\/(?:private\/)?(?:tmp|var\/folders\/[^/\s]+\/[^/\s]+\/T)\/[^/\s]+\/[^/\s]+\//g;
+
+function shorten(s: string): string {
+  return s.replace(CLONE_TMP_RE, "");
+}
+
+// Bash commands reduced to their path argument(s) only — the verb, flags, and
+// pipe syntax are noise in a feed whose job is to show "where", not "how".
+const SHELL_FLAG_WITH_VALUE_RE =
+  /^-(?:type|name|iname|path|ipath|maxdepth|mindepth|regex)$/;
+const SHELL_CONTROL_RE = /^(?:\||&&|\|\||;|>{1,2}|<)$/;
+
+function extractPaths(cmd: string): string | undefined {
+  const tokens = (cmd.match(/"[^"]*"|'[^']*'|\S+/g) ?? []).map((t) =>
+    t.replace(/^["']|["']$/g, ""),
+  );
+  const paths: string[] = [];
+  let skipNext = false;
+  let verb: string | undefined; // current pipeline segment's command name
+  let sawFirstArg = false;
+  for (const tok of tokens) {
+    if (skipNext) {
+      skipNext = false;
+      continue;
+    }
+    if (SHELL_CONTROL_RE.test(tok)) {
+      verb = undefined;
+      sawFirstArg = false;
+      continue;
+    }
+    if (verb === undefined) {
+      verb = tok; // the command name for this pipeline segment, not a path
+      continue;
+    }
+    if (SHELL_FLAG_WITH_VALUE_RE.test(tok)) {
+      skipNext = true;
+      continue;
+    }
+    if (tok.startsWith("-") || tok.includes("*") || tok.includes("?") || /^https?:\/\//.test(tok)) {
+      continue;
+    }
+    // grep/egrep/rg take the search pattern as their first non-flag argument.
+    if (!sawFirstArg && /^e?grep$|^rg$/.test(verb)) {
+      sawFirstArg = true;
+      continue;
+    }
+    sawFirstArg = true;
+    paths.push(tok);
+  }
+  return paths.length ? Array.from(new Set(paths)).join(" ") : undefined;
+}
+
 /** Pull the most useful single field out of a tool's input for display. */
 function toolDetail(name: string, input: Record<string, unknown>): string | undefined {
   const s = (k: string) => (typeof input[k] === "string" ? (input[k] as string) : undefined);
   switch (name.toLowerCase()) {
-    case "bash":
-      return s("command") ? truncate(s("command")!) : undefined;
+    case "bash": {
+      const cmd = s("command");
+      if (!cmd) return undefined;
+      // git/rm -rf calls already get their own status headline (see toolStatus
+      // below) — a raw command line here would just repeat that, not add a path.
+      if (/^\s*git\b/.test(cmd) || /rm\s+-rf/.test(cmd)) return undefined;
+      const paths = extractPaths(shorten(cmd));
+      return paths ? truncate(paths) : undefined;
+    }
     case "read":
     case "write":
     case "edit":
-      return s("file_path");
+      return s("file_path") ? shorten(s("file_path")!) : undefined;
     case "grep":
-      return [s("pattern"), s("path")].filter(Boolean).join("  in  ") || undefined;
+      return [s("pattern"), s("path") ? shorten(s("path")!) : undefined].filter(Boolean).join("  in  ") || undefined;
     case "glob":
       return s("pattern");
     case "webfetch":
