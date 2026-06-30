@@ -47,6 +47,9 @@ export async function POST(req: NextRequest) {
   // No length cap — long, detailed steering is encouraged.
   const steeringText = typeof rawSteering === "string" ? rawSteering.trim() : "";
 
+  const rawModel = (body as { model?: unknown })?.model;
+  const model = typeof rawModel === "string" && rawModel.trim() ? rawModel.trim() : undefined;
+
   // Analysis is keyed by repo: if this repo was already analyzed, surface the
   // existing report so the UI can offer "follow-up" vs "delete & start over".
   const force = (body as { force?: unknown })?.force === true;
@@ -57,6 +60,6 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  const meta = await startJob(urls, steeringText || undefined);
+  const meta = await startJob(urls, steeringText || undefined, model);
   return NextResponse.json(meta, { status: 201 });
 }

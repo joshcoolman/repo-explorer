@@ -24,6 +24,7 @@ interface Job {
   events: ProgressEvent[]; // buffered for late subscribers
   emitter: EventEmitter;
   done: boolean;
+  abortController?: AbortController;
   // Present only for follow-up jobs: write a new doc into an existing report
   // folder instead of producing a brand-new report.
   followUp?: {
@@ -61,6 +62,13 @@ export function getJob(id: string): Job | undefined {
   return registry.jobs.get(id);
 }
 
+export function cancelJob(id: string): boolean {
+  const job = registry.jobs.get(id);
+  if (!job || job.done) return false;
+  job.abortController?.abort();
+  return true;
+}
+
 export function subscribe(id: string, listener: (e: ProgressEvent) => void): () => void {
   const job = registry.jobs.get(id);
   if (!job) return () => {};
@@ -71,6 +79,7 @@ export function subscribe(id: string, listener: (e: ProgressEvent) => void): () 
 export async function startJob(
   urls: string[],
   steeringText?: string,
+  model?: string,
 ): Promise<ReportMeta> {
   const takenIds = (await readIndex()).map((r) => r.id);
   const id = uniqueSlug(deriveTitle(urls), takenIds);
@@ -82,6 +91,7 @@ export async function startJob(
     createdAt: new Date().toISOString(),
     status: "running",
     ...(steeringText ? { steeringText } : {}),
+    ...(model ? { model } : {}),
   };
 
   const job: Job = { id, meta, events: [], emitter: new EventEmitter(), done: false };
@@ -115,6 +125,9 @@ async function runJob(job: Job): Promise<void> {
   if (job.followUp) return runFollowUpJob(job);
 
   const startedAt = Date.now();
+  const abortController = new AbortController();
+  job.abortController = abortController;
+
   const emit = (e: ProgressEvent) => {
     job.events.push(e);
     job.emitter.emit("event", e);
@@ -127,6 +140,8 @@ async function runJob(job: Job): Promise<void> {
     outFile: reportDocPath(job.id, "index"),
     appRoot: process.cwd(),
     steeringText: job.meta.steeringText,
+    model: job.meta.model,
+    signal: abortController.signal,
     onEvent: emit,
   });
 
@@ -210,6 +225,9 @@ export async function startFollowUp(
 
 async function runFollowUpJob(job: Job): Promise<void> {
   const startedAt = Date.now();
+  const abortController = new AbortController();
+  job.abortController = abortController;
+
   const emit = (e: ProgressEvent) => {
     job.events.push(e);
     job.emitter.emit("event", e);
@@ -224,6 +242,7 @@ async function runFollowUpJob(job: Job): Promise<void> {
     request,
     resume: original.sessionId,
     appRoot: process.cwd(),
+    signal: abortController.signal,
     onEvent: emit,
   });
 

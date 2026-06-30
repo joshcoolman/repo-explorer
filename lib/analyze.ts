@@ -10,6 +10,8 @@ export interface AnalyzeOptions {
   outFile: string; // absolute path the report must be written to
   appRoot: string; // cwd; the dir whose .claude/skills/ holds the vendored skill
   steeringText?: string; // optional user focus/intent to prime the analysis
+  model?: string;
+  signal?: AbortSignal;
   onEvent: (e: ProgressEvent) => void;
 }
 
@@ -20,6 +22,7 @@ export interface FollowUpOptions {
   request: string; // the user's follow-up request
   resume?: string; // prior session id to resume, when available
   appRoot: string; // cwd; the dir whose .claude/skills/ holds the vendored skill
+  signal?: AbortSignal;
   onEvent: (e: ProgressEvent) => void;
 }
 
@@ -122,6 +125,7 @@ interface StreamQueryOptions {
   resume?: string; // resume a prior session instead of starting fresh
   model?: string;
   startLabel?: string;
+  signal?: AbortSignal;
   onEvent: (e: ProgressEvent) => void;
 }
 
@@ -131,7 +135,7 @@ interface StreamQueryOptions {
  * follow-up can resume the conversation). Shared by runAnalysis + runFollowUp.
  */
 async function streamQuery(opts: StreamQueryOptions): Promise<AnalyzeResult> {
-  const { prompt, appRoot, resume, model = DEFAULT_MODEL, onEvent } = opts;
+  const { prompt, appRoot, resume, model = DEFAULT_MODEL, onEvent, signal } = opts;
   let lastStatus = "";
   const emitStatus = (text: string) => {
     if (text && text !== lastStatus) {
@@ -161,6 +165,10 @@ async function streamQuery(opts: StreamQueryOptions): Promise<AnalyzeResult> {
         ...(resume ? { resume } : {}),
       },
     })) {
+      if (signal?.aborted) {
+        onEvent({ type: "done", ok: false, error: "Cancelled" });
+        return { ok: false, error: "Cancelled", sessionId };
+      }
       // Live token deltas — the "document revealing itself" feed.
       if (msg.type === "stream_event") {
         const ev = msg.event as {
@@ -232,6 +240,10 @@ async function streamQuery(opts: StreamQueryOptions): Promise<AnalyzeResult> {
     onEvent({ type: "done", ok: false, error });
     return { ok: false, error, sessionId };
   } catch (err) {
+    if (signal?.aborted || (err instanceof Error && err.name === "AbortError")) {
+      onEvent({ type: "done", ok: false, error: "Cancelled" });
+      return { ok: false, error: "Cancelled", sessionId };
+    }
     const error = err instanceof Error ? err.message : String(err);
     onEvent({ type: "done", ok: false, error });
     return { ok: false, error, sessionId };
@@ -242,6 +254,8 @@ export async function runAnalysis(opts: AnalyzeOptions): Promise<AnalyzeResult> 
   return streamQuery({
     prompt: buildPrompt(opts.urls, opts.outFile, opts.steeringText),
     appRoot: opts.appRoot,
+    model: opts.model,
+    signal: opts.signal,
     onEvent: opts.onEvent,
   });
 }
@@ -252,6 +266,7 @@ export async function runFollowUp(opts: FollowUpOptions): Promise<AnalyzeResult>
     appRoot: opts.appRoot,
     resume: opts.resume,
     startLabel: "Starting follow-up…",
+    signal: opts.signal,
     onEvent: opts.onEvent,
   });
 }

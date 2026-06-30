@@ -323,9 +323,13 @@ async function configureSubscription(input) {
   }
 
   await flushStdin();
+  const sep = c.yellow("━".repeat(46));
+  console.log(`\n  ${sep}`);
+  console.log(`  ${c.bold(c.yellow("▲  PASTE THE CODE PRINTED ABOVE  ▲"))}`);
+  console.log(`  ${sep}\n`);
   const token = (
     await input({
-      message: "Paste the token it printed above:",
+      message: "Paste the token printed above:",
       validate: (v) => (v.trim().length > 0 ? true : "Paste the token, or Ctrl-C to abort."),
     })
   ).trim();
@@ -463,11 +467,12 @@ async function launch(port) {
   const who = whoHasPort(port);
   const owner = who ? `${c.bold(who.command)} (pid ${who.pid})` : "another process";
   warn(`port ${port} is in use by ${owner} — not Repo Explorer.`);
+  if (who) info(`to free it manually: ${c.dim(`kill ${who.pid}`)}`);
   const choice = await select({
     message: "What do you want to do?",
     choices: [
-      { name: `Kill ${who ? who.command : "it"} and use port ${port}`, value: "kill" },
       { name: "Use a different port", value: "diff" },
+      { name: `Kill ${who ? who.command : "it"} and use port ${port}`, value: "kill" },
       { name: "Cancel", value: "cancel" },
     ],
   });
