@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Bookmark, X } from "lucide-react";
 import type { ProgressEvent, ReportMeta, TrendingRepo, TriageResult } from "@/lib/types";
 import { fmtCost, fmtDuration, relativeTime } from "@/lib/format";
 
@@ -14,9 +15,10 @@ function modelLabel(model: string | undefined): string {
   return MODELS.find((m) => m.id === model)?.label ?? "Opus 4.8";
 }
 import { toRepoRef } from "@/lib/sources";
+import { useBookmarks, type BookmarksApi } from "@/lib/bookmarks";
 
 type ActiveStatus = "running" | "done" | "error" | null;
-type View = "reports" | "trending";
+type View = "reports" | "trending" | "bookmarks";
 type Since = "daily" | "weekly" | "monthly";
 
 function fmtDate(iso: string): string {
@@ -77,6 +79,7 @@ export default function Explorer() {
   const [now, setNow] = useState(0);
 
   const [view, setView] = useState<View>("reports");
+  const bookmarks = useBookmarks();
   const [since, setSince] = useState<Since>("daily");
   const [trending, setTrending] = useState<TrendingRepo[]>([]);
   const [trendingLoading, setTrendingLoading] = useState(false);
@@ -391,6 +394,14 @@ export default function Explorer() {
     if (trending.length === 0 && !trendingLoading) void loadTrending(since);
   }, [trending.length, trendingLoading, since, loadTrending]);
 
+  const onNavClick = useCallback(
+    (v: View) => {
+      if (v === "trending") showTrending();
+      else setView(v);
+    },
+    [showTrending],
+  );
+
   const onSince = useCallback(
     (s: Since) => {
       setSince(s);
@@ -441,10 +452,10 @@ export default function Explorer() {
             Repo Explorer
           </h1>
           <div className="mt-3 flex gap-1 rounded-md border border-border p-0.5 text-xs">
-            {(["reports", "trending"] as View[]).map((v) => (
+            {(["reports", "trending", "bookmarks"] as View[]).map((v) => (
               <button
                 key={v}
-                onClick={() => (v === "trending" ? showTrending() : setView("reports"))}
+                onClick={() => onNavClick(v)}
                 className={`flex-1 rounded px-2 py-1 capitalize transition-colors ${
                   view === v
                     ? "bg-accent text-bg"
@@ -571,9 +582,21 @@ export default function Explorer() {
             error={trendingError}
             since={since}
             reportByUrl={reportByUrl}
+            bookmarks={bookmarks}
             onSince={onSince}
             onRefresh={() => loadTrending(since)}
-            onAnalyze={(url) => startAnalysis([url], undefined, false, true)}
+            onAnalyze={(url, steeringText) => {
+              void startAnalysis([url], steeringText, false, true);
+            }}
+            onView={(r) => onSelect(r)}
+          />
+        ) : view === "bookmarks" ? (
+          <BookmarksView
+            reportByUrl={reportByUrl}
+            bookmarks={bookmarks}
+            onAnalyze={(url, steeringText) => {
+              void startAnalysis([url], steeringText, false, true);
+            }}
             onView={(r) => onSelect(r)}
           />
         ) : (
@@ -963,6 +986,7 @@ function TrendingView({
   error,
   since,
   reportByUrl,
+  bookmarks,
   onSince,
   onRefresh,
   onAnalyze,
@@ -973,9 +997,10 @@ function TrendingView({
   error: string | null;
   since: Since;
   reportByUrl: Map<string, ReportMeta>;
+  bookmarks: BookmarksApi;
   onSince: (s: Since) => void;
   onRefresh: () => void;
-  onAnalyze: (url: string) => void;
+  onAnalyze: (url: string, steeringText?: string) => void;
   onView: (r: ReportMeta) => void;
 }) {
   const [dismissed, setDismissed] = useState<Set<string>>(() => {
@@ -1040,70 +1065,27 @@ function TrendingView({
         ) : (
           <div className="mx-auto max-w-3xl">
             <ul className="flex flex-col gap-3">
-              {activeRepos.map((repo) => {
-                const report = reportByUrl.get(repo.url);
-                return (
-                  <li
-                    key={repo.url}
-                    className="rounded-lg border border-border bg-panel p-4"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <a
-                          href={repo.url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-sm font-medium text-accent hover:underline"
-                        >
-                          {repo.owner}/{repo.repo}
-                        </a>
-                        {repo.description && (
-                          <p className="mt-1 text-sm text-muted">
-                            {repo.description}
-                          </p>
-                        )}
-                        <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted">
-                          {repo.language && <span>{repo.language}</span>}
-                          {repo.stars != null && (
-                            <span>★ {repo.stars.toLocaleString()}</span>
-                          )}
-                          {repo.starsToday != null && (
-                            <span className="text-accent-2">
-                              {repo.starsToday.toLocaleString()} stars{" "}
-                              {since === "daily"
-                                ? "today"
-                                : since === "weekly"
-                                  ? "this week"
-                                  : "this month"}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                      <div className="shrink-0">
-                        {report?.status === "done" ? (
-                          <button
-                            onClick={() => onView(report)}
-                            className="rounded-md border border-border px-3 py-1.5 text-xs text-text hover:border-accent"
-                          >
-                            View report
-                          </button>
-                        ) : report?.status === "running" ? (
-                          <span className="text-xs text-accent">
-                            ● Analyzing…
-                          </span>
-                        ) : (
-                          <button
-                            onClick={() => setTriageTarget(repo)}
-                            className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-bg hover:opacity-90"
-                          >
-                            Analyze
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  </li>
-                );
-              })}
+              {activeRepos.map((repo) => (
+                <RepoCard
+                  key={repo.url}
+                  repo={repo}
+                  report={reportByUrl.get(repo.url)}
+                  sinceLabel={
+                    since === "daily"
+                      ? "today"
+                      : since === "weekly"
+                        ? "this week"
+                        : "this month"
+                  }
+                  isBookmarked={bookmarks.isBookmarked(repo.url)}
+                  onAnalyze={() => setTriageTarget(repo)}
+                  onView={onView}
+                  onToggleBookmark={() => bookmarks.toggleBookmark(repo)}
+                  onDismiss={() =>
+                    setDismissed((prev) => new Set([...prev, repo.url]))
+                  }
+                />
+              ))}
             </ul>
 
             {dismissedRepos.length > 0 && (
@@ -1150,13 +1132,176 @@ function TrendingView({
       {triageTarget && (
         <TriageModal
           repo={triageTarget}
+          isBookmarked={bookmarks.isBookmarked(triageTarget.url)}
+          onToggleBookmark={() => bookmarks.toggleBookmark(triageTarget)}
           onClose={() => setTriageTarget(null)}
           onDismiss={() => {
             setDismissed((prev) => new Set([...prev, triageTarget.url]));
             setTriageTarget(null);
           }}
-          onAnalyze={() => {
-            onAnalyze(triageTarget.url);
+          onAnalyze={(steeringText) => {
+            onAnalyze(triageTarget.url, steeringText);
+            setTriageTarget(null);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function RepoCard({
+  repo,
+  report,
+  sinceLabel,
+  isBookmarked,
+  onAnalyze,
+  onView,
+  onToggleBookmark,
+  onDismiss,
+}: {
+  repo: TrendingRepo;
+  report?: ReportMeta;
+  sinceLabel?: string | null;
+  isBookmarked: boolean;
+  onAnalyze: () => void;
+  onView: (r: ReportMeta) => void;
+  onToggleBookmark: () => void;
+  onDismiss?: () => void;
+}) {
+  return (
+    <li className="relative rounded-lg border border-border bg-panel p-4">
+      <button
+        onClick={onToggleBookmark}
+        aria-label={isBookmarked ? "Remove bookmark" : "Bookmark"}
+        aria-pressed={isBookmarked}
+        title={isBookmarked ? "Bookmarked" : "Bookmark"}
+        className={`absolute right-2 top-2 rounded-full border p-1.5 transition-colors ${
+          isBookmarked
+            ? "border-accent/40 text-accent hover:bg-accent/10"
+            : "border-border text-muted hover:border-accent hover:text-text"
+        }`}
+      >
+        <Bookmark
+          className="h-4 w-4"
+          fill={isBookmarked ? "currentColor" : "none"}
+        />
+      </button>
+      {onDismiss && (
+        <button
+          onClick={onDismiss}
+          aria-label="Not interested"
+          title="Not interested"
+          className="absolute bottom-2 right-2 rounded-full border border-border p-1.5 text-muted transition-colors hover:border-bad hover:text-bad"
+        >
+          <X className="h-4 w-4" />
+        </button>
+      )}
+      <div className="flex items-center justify-between gap-3 pr-10">
+        <div className="min-w-0">
+          <a
+            href={repo.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-sm font-medium text-accent hover:underline"
+          >
+            {repo.owner}/{repo.repo}
+          </a>
+          {repo.description && (
+            <p className="mt-1 text-sm text-muted">{repo.description}</p>
+          )}
+          <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted">
+            {repo.language && <span>{repo.language}</span>}
+            {repo.stars != null && (
+              <span>★ {repo.stars.toLocaleString()}</span>
+            )}
+            {sinceLabel && repo.starsToday != null && (
+              <span className="text-accent-2">
+                {repo.starsToday.toLocaleString()} stars {sinceLabel}
+              </span>
+            )}
+          </div>
+        </div>
+        <div className="shrink-0">
+          {report?.status === "done" ? (
+            <button
+              onClick={() => onView(report)}
+              className="rounded-md border border-border px-3 py-1.5 text-xs text-text hover:border-accent"
+            >
+              View report
+            </button>
+          ) : report?.status === "running" ? (
+            <span className="text-xs text-accent">● Analyzing…</span>
+          ) : (
+            <button
+              onClick={onAnalyze}
+              className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-bg hover:opacity-90"
+            >
+              Analyze
+            </button>
+          )}
+        </div>
+      </div>
+    </li>
+  );
+}
+
+function BookmarksView({
+  bookmarks,
+  reportByUrl,
+  onAnalyze,
+  onView,
+}: {
+  bookmarks: BookmarksApi;
+  reportByUrl: Map<string, ReportMeta>;
+  onAnalyze: (url: string, steeringText?: string) => void;
+  onView: (r: ReportMeta) => void;
+}) {
+  const [triageTarget, setTriageTarget] = useState<TrendingRepo | null>(null);
+
+  return (
+    <div className="flex h-full flex-col">
+      <div className="flex flex-wrap items-center gap-2 border-b border-border bg-panel px-4 py-3">
+        <span className="text-sm text-text">Bookmarks</span>
+        <span className="text-xs text-muted">{bookmarks.bookmarks.length}</span>
+      </div>
+
+      <div className="min-h-0 flex-1 overflow-y-auto p-4">
+        {bookmarks.bookmarks.length === 0 ? (
+          <p className="px-2 py-6 text-sm text-muted">
+            No bookmarks yet — bookmark repos from Trending to revisit them here.
+          </p>
+        ) : (
+          <div className="mx-auto max-w-3xl">
+            <ul className="flex flex-col gap-3">
+              {bookmarks.bookmarks.map((repo) => (
+                <RepoCard
+                  key={repo.url}
+                  repo={repo}
+                  report={reportByUrl.get(repo.url)}
+                  sinceLabel={null}
+                  isBookmarked
+                  onAnalyze={() => setTriageTarget(repo)}
+                  onView={onView}
+                  onToggleBookmark={() => bookmarks.removeBookmark(repo.url)}
+                />
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
+
+      {triageTarget && (
+        <TriageModal
+          repo={triageTarget}
+          isBookmarked={bookmarks.isBookmarked(triageTarget.url)}
+          onToggleBookmark={() => bookmarks.toggleBookmark(triageTarget)}
+          onClose={() => setTriageTarget(null)}
+          onDismiss={() => {
+            bookmarks.removeBookmark(triageTarget.url);
+            setTriageTarget(null);
+          }}
+          onAnalyze={(steeringText) => {
+            onAnalyze(triageTarget.url, steeringText);
             setTriageTarget(null);
           }}
         />
@@ -1167,18 +1312,23 @@ function TrendingView({
 
 function TriageModal({
   repo,
+  isBookmarked,
+  onToggleBookmark,
   onClose,
   onDismiss,
   onAnalyze,
 }: {
   repo: TrendingRepo;
+  isBookmarked: boolean;
+  onToggleBookmark: () => void;
   onClose: () => void;
   onDismiss: () => void;
-  onAnalyze: () => void;
+  onAnalyze: (steeringText?: string) => void;
 }) {
   const [triage, setTriage] = useState<TriageResult | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [steering, setSteering] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -1325,19 +1475,51 @@ function TriageModal({
         </div>
 
         {/* footer */}
-        <div className="flex items-center justify-between border-t border-border px-5 py-3">
-          <button
-            onClick={onDismiss}
-            className="rounded-md border border-bad/40 px-3 py-1.5 text-xs text-bad hover:bg-bad/10"
-          >
-            Not interested
-          </button>
-          <button
-            onClick={onAnalyze}
-            className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-bg hover:opacity-90"
-          >
-            Analyze →
-          </button>
+        <div className="space-y-3 border-t border-border px-5 py-3">
+          <label className="block space-y-1">
+            <span className="text-xs text-muted">
+              Additional instructions{" "}
+              <span className="text-text/40">(optional)</span>
+            </span>
+            <textarea
+              value={steering}
+              onChange={(e) => setSteering(e.target.value)}
+              rows={2}
+              placeholder="Focus the analysis — e.g. only the auth layer, how it handles caching…"
+              className="w-full resize-y rounded-md border border-border bg-panel-2 px-2.5 py-1.5 text-xs text-text placeholder:text-muted/60 focus:border-accent focus:outline-none"
+            />
+          </label>
+          <div className="flex items-center justify-between gap-2">
+            <button
+              onClick={onDismiss}
+              className="rounded-md border border-bad/40 px-3 py-1.5 text-xs text-bad hover:bg-bad/10"
+            >
+              Not interested
+            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={onToggleBookmark}
+                aria-pressed={isBookmarked}
+                className={`flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs transition-colors ${
+                  isBookmarked
+                    ? "border-accent/40 text-accent hover:bg-accent/10"
+                    : "border-border text-muted hover:border-accent hover:text-text"
+                }`}
+              >
+                <Bookmark
+                  className="h-3.5 w-3.5"
+                  fill={isBookmarked ? "currentColor" : "none"}
+                />
+                {isBookmarked ? "Bookmarked" : "Bookmark"}
+              </button>
+              <button
+                onClick={() => onAnalyze(steering.trim() || undefined)}
+                className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-bg hover:opacity-90"
+              >
+                Analyze →
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     </div>
