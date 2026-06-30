@@ -116,10 +116,10 @@ job runner ─► Agent SDK query() ─► loads .claude/skills/explore-repo ─
 ## Status
 
 **Last shipped:**
+- Sonnet 5 is now the default model (was Opus 4.8); selector offers Sonnet 5 / Opus 4.8 / Haiku 4.5.
+- Cleaned up the live tool-call log: paths shown relative to the cloned repo root (no more full `/var/folders/.../tmp.X/<repo>/...` noise), and Bash command lines reduced to just their path argument(s) — verb, flags, and pipe syntax stripped.
 - Bookmarks — a third sidebar view. Bookmark a repo from the Trending triage modal or any repo card to revisit later without analyzing; the Bookmarks view mirrors Trending (same cards, Analyze/triage flow) and supports unbookmarking. Persisted in localStorage (`repo-explorer:bookmarks`), shared across views via the `useBookmarks` hook (`lib/bookmarks.ts`). Trending and Bookmarks now render through a shared `RepoCard`.
-- Steering from triage — the Trending triage modal now has an "Additional instructions" input, so you can focus the analysis (e.g. "only the auth layer") before hitting Analyze. Backend already threaded `steeringText` end-to-end; this exposed it on the Trending path.
-- Triage modal on Trending tab — clicking Analyze shows a GitHub API preview (stars, language, README excerpt, activity verdict) before committing tokens. Analysis starts silently in the background; user stays on Trending. "Not interested" dismisses to a collapsible section, persisted in localStorage.
-- Stop button — cancel a running analysis mid-stream via AbortController.
-- Model selector — choose Opus / Sonnet / Haiku per analysis from the form.
+- Triage modal on Trending tab — clicking Analyze shows a GitHub API preview (stars, language, README excerpt, activity verdict) before committing tokens, with steering ("Additional instructions") to focus the analysis before it starts.
+- Stop button — cancel a running analysis mid-stream via AbortController. Note: this is currently a hard kill (no partial report saved); a graceful "wrap up what you have" stop is a candidate follow-up.
 
 **Up next:** see [open issues](https://github.com/joshcoolman/repo-explorer/issues)
