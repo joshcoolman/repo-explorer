@@ -1,8 +1,9 @@
 # Repo Explorer
 
-A local web GUI around the `explore-repo` skill. Paste one or two GitHub URLs, hit
-**Go**, and it generates a self-contained HTML architectural review — then keeps an
-index of past reports you can browse in the sidebar.
+A local web GUI around the `explore-repo` skill and its **personas** — swappable
+variants with their own investigation scope and report template. Paste one or two
+GitHub URLs, pick a persona, hit **Go**, and it generates a self-contained HTML
+report — then keeps an index of past reports you can browse in the sidebar.
 
 It runs the skill **headlessly** via the local [Claude Agent SDK]
 (`@anthropic-ai/claude-agent-sdk`): the agent shallow-clones each repo to a temp
@@ -98,14 +99,22 @@ Browser ─ POST /api/jobs ─────────────► start an i
         ─ GET  /api/jobs/[id]/events ──► SSE stream of progress
         ─ GET  /api/reports ──────────► list from data/index.json
         ─ GET  /api/reports/[id] ─────► serve data/reports/<id>.html
-job runner ─► Agent SDK query() ─► loads .claude/skills/explore-repo ─► report
+        ─ GET  /api/personas ─────────► list from .claude/skills/personas.json
+job runner ─► Agent SDK query() ─► loads .claude/skills/<chosen persona> ─► report
 ```
 
-- `lib/analyze.ts` — wraps the Agent SDK `query()` call.
+- `lib/analyze.ts` — wraps the Agent SDK `query()` call; `skills: [persona]` defaults
+  to `"explore-repo"`.
 - `lib/jobs.ts` — in-process job registry + queue, streams progress events.
 - `lib/store.ts` — `data/index.json` manifest + report files.
+- `lib/personas.ts` — reads `.claude/skills/personas.json` (the persona registry).
 - `.claude/skills/explore-repo/` — **vendored copy** of the canonical skill from
   `~/.claude/skills/explore-repo/`. Re-copy it to pick up upstream changes.
+- `.claude/skills/personas.json` — the persona registry (`{id, skillFolder, label,
+  description}` per entry), user-selected in the app. New personas are project-local
+  (no canonical global copy) and are scaffolded via the `create-persona` meta-skill —
+  see `.claude/skills/create-persona/SKILL.md`, invoked with `/create-persona <what
+  you want it to focus on>` in a Claude Code session in this repo.
 
 ## Notes
 
@@ -116,6 +125,7 @@ job runner ─► Agent SDK query() ─► loads .claude/skills/explore-repo ─
 ## Status
 
 **Last shipped:**
+- Analysis personas — the app now supports swappable skill variants (scope + report template) alongside the default `explore-repo` "Architectural Review". A JSON registry (`.claude/skills/personas.json`) is the source of truth; `GET /api/personas` feeds a new selector next to the model dropdown; the chosen persona is persisted on `ReportMeta` and shown as a sidebar badge; follow-ups inherit the original report's persona. New personas are authored via the `create-persona` meta-skill (`/create-persona` in a Claude Code session in this repo) — no example persona beyond the default was authored as part of this change; that's for the user to do next.
 - Sonnet 5 is now the default model (was Opus 4.8); selector offers Sonnet 5 / Opus 4.8 / Haiku 4.5.
 - Cleaned up the live tool-call log: paths shown relative to the cloned repo root (no more full `/var/folders/.../tmp.X/<repo>/...` noise), and Bash command lines reduced to just their path argument(s) — verb, flags, and pipe syntax stripped.
 - Bookmarks — a third sidebar view. Bookmark a repo from the Trending triage modal or any repo card to revisit later without analyzing; the Bookmarks view mirrors Trending (same cards, Analyze/triage flow) and supports unbookmarking. Persisted in localStorage (`repo-explorer:bookmarks`), shared across views via the `useBookmarks` hook (`lib/bookmarks.ts`). Trending and Bookmarks now render through a shared `RepoCard`.

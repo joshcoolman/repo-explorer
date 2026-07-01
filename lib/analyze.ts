@@ -5,12 +5,17 @@ import type { ProgressEvent } from "./types";
 // model-selection feature only needs to thread a value here.
 const DEFAULT_MODEL = "claude-sonnet-5";
 
+// The default analysis persona — the skill folder name under .claude/skills/.
+// Other personas are discovered at runtime via the registry (lib/personas.ts).
+const DEFAULT_PERSONA = "explore-repo";
+
 export interface AnalyzeOptions {
   urls: string[]; // 1 = single review, 2 = comparison
   outFile: string; // absolute path the report must be written to
   appRoot: string; // cwd; the dir whose .claude/skills/ holds the vendored skill
   steeringText?: string; // optional user focus/intent to prime the analysis
   model?: string;
+  persona?: string; // skill folder name to invoke; defaults to DEFAULT_PERSONA
   signal?: AbortSignal;
   onEvent: (e: ProgressEvent) => void;
 }
@@ -22,6 +27,7 @@ export interface FollowUpOptions {
   request: string; // the user's follow-up request
   resume?: string; // prior session id to resume, when available
   appRoot: string; // cwd; the dir whose .claude/skills/ holds the vendored skill
+  persona?: string; // the persona that produced the original report; defaults to DEFAULT_PERSONA
   signal?: AbortSignal;
   onEvent: (e: ProgressEvent) => void;
 }
@@ -33,14 +39,19 @@ export interface AnalyzeResult {
   sessionId?: string; // captured so follow-ups can resume this conversation
 }
 
-function buildPrompt(urls: string[], outFile: string, steeringText?: string): string {
+function buildPrompt(
+  urls: string[],
+  outFile: string,
+  steeringText: string | undefined,
+  persona: string,
+): string {
   const compare = urls.length === 2;
   const subject = compare
     ? `${urls[0]} and compare with ${urls[1]}`
     : urls[0];
   const steering = steeringText?.trim();
   return [
-    `Use the explore-repo skill to analyze ${subject}.`,
+    `Use the ${persona} skill to analyze ${subject}.`,
     steering
       ? `The user has asked you to focus on: ${steering} — prioritize this throughout the investigation and weight the report toward it, while still covering the essential structure.`
       : null,
@@ -174,7 +185,7 @@ function toolStatus(name: string, input: Record<string, unknown>): string | unde
     if (/rm\s+-rf/.test(cmd)) return "Cleaning up the clone…";
     return undefined;
   }
-  if (lower === "skill") return "Loading the explore-repo skill…";
+  if (lower === "skill") return "Loading the analysis skill…";
   if (lower === "task" || lower === "agent")
     return "Reading the repository with the Explore subagent — this is the long step…";
   if (["read", "grep", "glob"].includes(lower)) return "Reading source files…";
@@ -187,6 +198,7 @@ interface StreamQueryOptions {
   appRoot: string;
   resume?: string; // resume a prior session instead of starting fresh
   model?: string;
+  persona?: string; // skill folder name to invoke; defaults to DEFAULT_PERSONA
   startLabel?: string;
   signal?: AbortSignal;
   onEvent: (e: ProgressEvent) => void;
@@ -198,7 +210,15 @@ interface StreamQueryOptions {
  * follow-up can resume the conversation). Shared by runAnalysis + runFollowUp.
  */
 async function streamQuery(opts: StreamQueryOptions): Promise<AnalyzeResult> {
-  const { prompt, appRoot, resume, model = DEFAULT_MODEL, onEvent, signal } = opts;
+  const {
+    prompt,
+    appRoot,
+    resume,
+    model = DEFAULT_MODEL,
+    persona = DEFAULT_PERSONA,
+    onEvent,
+    signal,
+  } = opts;
   let lastStatus = "";
   const emitStatus = (text: string) => {
     if (text && text !== lastStatus) {
@@ -220,7 +240,7 @@ async function streamQuery(opts: StreamQueryOptions): Promise<AnalyzeResult> {
       options: {
         cwd: appRoot,
         settingSources: ["project"], // discover .claude/skills from the app, not ~/.claude
-        skills: ["explore-repo"],
+        skills: [persona],
         permissionMode: "bypassPermissions",
         allowDangerouslySkipPermissions: true,
         includePartialMessages: true, // stream thinking/text token-by-token
@@ -314,10 +334,12 @@ async function streamQuery(opts: StreamQueryOptions): Promise<AnalyzeResult> {
 }
 
 export async function runAnalysis(opts: AnalyzeOptions): Promise<AnalyzeResult> {
+  const persona = opts.persona ?? DEFAULT_PERSONA;
   return streamQuery({
-    prompt: buildPrompt(opts.urls, opts.outFile, opts.steeringText),
+    prompt: buildPrompt(opts.urls, opts.outFile, opts.steeringText, persona),
     appRoot: opts.appRoot,
     model: opts.model,
+    persona,
     signal: opts.signal,
     onEvent: opts.onEvent,
   });
@@ -328,6 +350,7 @@ export async function runFollowUp(opts: FollowUpOptions): Promise<AnalyzeResult>
     prompt: buildFollowUpPrompt(opts.outPath, opts.basePath, opts.repos, opts.request),
     appRoot: opts.appRoot,
     resume: opts.resume,
+    persona: opts.persona,
     startLabel: "Starting follow-up…",
     signal: opts.signal,
     onEvent: opts.onEvent,

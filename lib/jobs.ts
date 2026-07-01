@@ -80,6 +80,7 @@ export async function startJob(
   urls: string[],
   steeringText?: string,
   model?: string,
+  persona?: string,
 ): Promise<ReportMeta> {
   const takenIds = (await readIndex()).map((r) => r.id);
   const id = uniqueSlug(deriveTitle(urls), takenIds);
@@ -92,6 +93,7 @@ export async function startJob(
     status: "running",
     ...(steeringText ? { steeringText } : {}),
     ...(model ? { model } : {}),
+    ...(persona ? { persona } : {}),
   };
 
   const job: Job = { id, meta, events: [], emitter: new EventEmitter(), done: false };
@@ -141,6 +143,7 @@ async function runJob(job: Job): Promise<void> {
     appRoot: process.cwd(),
     steeringText: job.meta.steeringText,
     model: job.meta.model,
+    persona: job.meta.persona,
     signal: abortController.signal,
     onEvent: emit,
   });
@@ -242,6 +245,7 @@ async function runFollowUpJob(job: Job): Promise<void> {
     request,
     resume: original.sessionId,
     appRoot: process.cwd(),
+    persona: original.persona,
     signal: abortController.signal,
     onEvent: emit,
   });

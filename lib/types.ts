@@ -21,8 +21,17 @@ export interface ReportMeta {
   durationMs?: number; // wall-clock time the analysis actually ran
   steeringText?: string; // optional user focus/intent for this run
   model?: string; // claude model id used for this run
+  persona?: string; // persona registry entry id used for this run (e.g. "explore-repo")
   sessionId?: string; // Agent SDK session id, so follow-ups can resume the conversation
   followUps?: FollowUp[]; // follow-up docs in this report's folder, oldest first
+}
+
+/** An entry in the persona registry (.claude/skills/personas.json). */
+export interface PersonaEntry {
+  id: string; // referenced from ReportMeta.persona and the API payload
+  skillFolder: string; // directory name under .claude/skills/, fed to the SDK's `skills: [...]`
+  label: string; // human-friendly name for the selector/badge
+  description: string; // one-liner shown as a tooltip
 }
 
 /** A repo from github.com/trending (ephemeral, not persisted). */

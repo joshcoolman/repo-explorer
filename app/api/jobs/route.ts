@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { startJob } from "@/lib/jobs";
 import { findExistingReport } from "@/lib/store";
+import { readPersonas } from "@/lib/personas";
 
 export const runtime = "nodejs";
 
@@ -50,6 +51,16 @@ export async function POST(req: NextRequest) {
   const rawModel = (body as { model?: unknown })?.model;
   const model = typeof rawModel === "string" && rawModel.trim() ? rawModel.trim() : undefined;
 
+  const rawPersona = (body as { persona?: unknown })?.persona;
+  const persona =
+    typeof rawPersona === "string" && rawPersona.trim() ? rawPersona.trim() : undefined;
+  if (persona) {
+    const known = await readPersonas();
+    if (!known.some((p) => p.id === persona)) {
+      return NextResponse.json({ error: `Unknown persona: ${persona}` }, { status: 400 });
+    }
+  }
+
   // Analysis is keyed by repo: if this repo was already analyzed, surface the
   // existing report so the UI can offer "follow-up" vs "delete & start over".
   const force = (body as { force?: unknown })?.force === true;
@@ -60,6 +71,6 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  const meta = await startJob(urls, steeringText || undefined, model);
+  const meta = await startJob(urls, steeringText || undefined, model, persona);
   return NextResponse.json(meta, { status: 201 });
 }

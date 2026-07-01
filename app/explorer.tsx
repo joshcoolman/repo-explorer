@@ -1,8 +1,15 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Bookmark, X } from "lucide-react";
-import type { ProgressEvent, ReportMeta, TrendingRepo, TriageResult } from "@/lib/types";
+import * as Select from "@radix-ui/react-select";
+import { Bookmark, Check, ChevronDown, Plus, X } from "lucide-react";
+import type {
+  PersonaEntry,
+  ProgressEvent,
+  ReportMeta,
+  TrendingRepo,
+  TriageResult,
+} from "@/lib/types";
 import { fmtCost, fmtDuration, relativeTime } from "@/lib/format";
 
 const MODELS = [
@@ -13,6 +20,24 @@ const MODELS = [
 
 function modelLabel(model: string | undefined): string {
   return MODELS.find((m) => m.id === model)?.label ?? "Sonnet 5";
+}
+
+// Transient placeholder shown only until GET /api/personas resolves — the
+// registry file (.claude/skills/personas.json) is the actual source of truth.
+const SEED_PERSONA: PersonaEntry = {
+  id: "explore-repo",
+  skillFolder: "explore-repo",
+  label: "Architectural Review",
+  description:
+    "Learning-oriented architectural review — patterns, structure, what's worth stealing or porting.",
+};
+
+// Sentinel value for the trailing "Create Your Own" item in the persona
+// selector — never a real persona id, intercepted before it reaches setPersona.
+const CREATE_PERSONA_SENTINEL = "__create_persona__";
+
+function personaLabel(personas: PersonaEntry[], id: string | undefined): string {
+  return personas.find((p) => p.id === id)?.label ?? "Architectural Review";
 }
 import { toRepoRef } from "@/lib/sources";
 import { useBookmarks, type BookmarksApi } from "@/lib/bookmarks";
@@ -51,6 +76,9 @@ export default function Explorer() {
   const [urlB, setUrlB] = useState("");
   const [steering, setSteering] = useState("");
   const [model, setModel] = useState<string>(MODELS[0].id);
+  const [personas, setPersonas] = useState<PersonaEntry[]>([SEED_PERSONA]);
+  const [persona, setPersona] = useState<string>(SEED_PERSONA.id);
+  const [showCreatePersonaInfo, setShowCreatePersonaInfo] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
@@ -105,6 +133,21 @@ export default function Explorer() {
       }
     } catch {
       /* ignore */
+    }
+  }, []);
+
+  const loadPersonas = useCallback(async () => {
+    try {
+      const res = await fetch("/api/personas", { cache: "no-store" });
+      if (res.ok) {
+        const list: PersonaEntry[] = await res.json();
+        if (list.length > 0) {
+          setPersonas(list);
+          setPersona((prev) => (list.some((p) => p.id === prev) ? prev : list[0].id));
+        }
+      }
+    } catch {
+      /* ignore — falls back to the seeded default; server also defaults to it */
     }
   }, []);
 
@@ -173,7 +216,7 @@ export default function Explorer() {
   // Initial load; auto-attach to a running job after a refresh.
   useEffect(() => {
     void (async () => {
-      await loadReports();
+      await Promise.all([loadReports(), loadPersonas()]);
       if (attachedRef.current) return;
       const running = reportsRef.current.find((r) => r.status === "running");
       if (running) {
@@ -183,7 +226,7 @@ export default function Explorer() {
       }
     })();
     return () => esRef.current?.close();
-  }, [loadReports, openJob]);
+  }, [loadReports, loadPersonas, openJob]);
 
   // Tick once a second while a job is live, for the elapsed timer.
   useEffect(() => {
@@ -236,7 +279,7 @@ export default function Explorer() {
         const res = await fetch("/api/jobs", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ urls, steeringText, model, force }),
+          body: JSON.stringify({ urls, steeringText, model, persona, force }),
         });
         const data = await res.json();
         if (!res.ok) {
@@ -490,6 +533,7 @@ export default function Explorer() {
               {reports.map((r) => {
                 const selected = r.id === selectedId;
                 const meta = [
+                  personaLabel(personas, r.persona),
                   modelLabel(r.model),
                   fmtDuration(r.durationMs),
                   fmtCost(r.costUsd),
@@ -776,6 +820,54 @@ export default function Explorer() {
                         <option key={m.id} value={m.id}>{m.label}</option>
                       ))}
                     </select>
+                    <Select.Root
+                      value={persona}
+                      onValueChange={(v) => {
+                        if (v === CREATE_PERSONA_SENTINEL) {
+                          setShowCreatePersonaInfo(true);
+                          return; // sentinel — never becomes the selected persona
+                        }
+                        setPersona(v);
+                      }}
+                    >
+                      <Select.Trigger className="flex items-center gap-1.5 rounded-md border border-border bg-bg px-2 py-2 text-sm text-text outline-none focus:border-accent">
+                        <Select.Value />
+                        <Select.Icon>
+                          <ChevronDown size={14} className="text-muted" />
+                        </Select.Icon>
+                      </Select.Trigger>
+                      <Select.Portal>
+                        <Select.Content
+                          position="popper"
+                          sideOffset={4}
+                          className="z-50 overflow-hidden rounded-md border border-border bg-panel shadow-xl"
+                        >
+                          <Select.Viewport className="p-1">
+                            {personas.map((p) => (
+                              <Select.Item
+                                key={p.id}
+                                value={p.id}
+                                title={p.description}
+                                className="relative flex cursor-pointer select-none items-center rounded-sm py-1.5 pl-7 pr-3 text-sm text-text outline-none data-[highlighted]:bg-panel-2"
+                              >
+                                <Select.ItemIndicator className="absolute left-2 inline-flex items-center">
+                                  <Check size={13} className="text-accent" />
+                                </Select.ItemIndicator>
+                                <Select.ItemText>{p.label}</Select.ItemText>
+                              </Select.Item>
+                            ))}
+                            <Select.Separator className="my-1 h-px bg-border" />
+                            <Select.Item
+                              value={CREATE_PERSONA_SENTINEL}
+                              className="relative flex cursor-pointer select-none items-center gap-1.5 rounded-sm py-1.5 pl-7 pr-3 text-sm text-accent outline-none data-[highlighted]:bg-panel-2"
+                            >
+                              <Plus size={13} className="absolute left-2" />
+                              <Select.ItemText>Create Your Own</Select.ItemText>
+                            </Select.Item>
+                          </Select.Viewport>
+                        </Select.Content>
+                      </Select.Portal>
+                    </Select.Root>
                     <button
                       type="submit"
                       disabled={submitting || running}
@@ -856,6 +948,57 @@ export default function Explorer() {
           </div>
         )}
       </main>
+      {showCreatePersonaInfo && (
+        <CreatePersonaInfoModal onClose={() => setShowCreatePersonaInfo(false)} />
+      )}
+    </div>
+  );
+}
+
+function CreatePersonaInfoModal({ onClose }: { onClose: () => void }) {
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+      onClick={onClose}
+    >
+      <div
+        className="relative w-full max-w-lg rounded-xl border border-border bg-panel p-5 shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-start justify-between gap-3">
+          <h3 className="text-sm font-medium text-text">Create your own persona</h3>
+          <button
+            onClick={onClose}
+            aria-label="Close"
+            className="shrink-0 text-lg leading-none text-muted hover:text-text"
+          >
+            ×
+          </button>
+        </div>
+        <p className="mt-3 text-sm text-muted">
+          Personas aren&apos;t created from this app — they&apos;re scaffolded by having
+          a conversation with Claude Code in this repo. Open a terminal in the
+          repo-explorer directory and run:
+        </p>
+        <code className="mt-3 block rounded-md border border-border bg-bg px-3 py-2 font-mono text-xs text-accent">
+          /create-persona &lt;what you want it to focus on&gt;
+        </code>
+        <p className="mt-3 text-sm text-muted">
+          Claude will interview you about scope, report structure, and voice, then
+          write a new skill under{" "}
+          <span className="font-mono text-text">.claude/skills/</span> and register
+          it in <span className="font-mono text-text">personas.json</span>. Refresh
+          this page afterward and it shows up in the dropdown above.
+        </p>
+      </div>
     </div>
   );
 }
